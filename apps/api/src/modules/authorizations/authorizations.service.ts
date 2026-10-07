@@ -456,6 +456,37 @@ export class AuthorizationsService {
     });
   }
 
+  async removeStore(
+    id: string,
+    storeId: string,
+    user: AuthUser,
+  ): Promise<{ deleted: boolean; letter: AuthorizationLetterDto | null }> {
+    const current = await this.findRow(id);
+    const coverage = current.stores.find((s) => s.storeId === storeId);
+    if (!coverage) throw new NotFoundException('Esta loja não está na carta.');
+    if (current.stores.length === 1) {
+      await this.remove(id, user);
+      return { deleted: true, letter: null };
+    }
+    await this.db.authorizationLetterStore.delete({ where: { id: coverage.id } });
+    await this.db.authorizationLetterHistory.create({
+      data: {
+        letterId: id,
+        action: 'UPDATED',
+        userId: user.id,
+        details: JSON.stringify({ lojaRemovida: coverage.store.code }),
+      },
+    });
+    void this.audit.log({
+      userId: user.id,
+      entity: 'authorization',
+      entityId: id,
+      action: 'authorization.remove_store',
+      metadata: { storeId, code: coverage.store.code },
+    });
+    return { deleted: false, letter: await this.get(id) };
+  }
+
   async history(id: string): Promise<LetterHistoryDto[]> {
     const exists = await this.db.authorizationLetter.findUnique({
       where: { id },

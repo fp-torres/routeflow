@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Copy, Link2, Plus, Upload } from 'lucide-react';
+import { Copy, Link2, Plus, Upload, Camera, ImagePlus, Trash } from 'lucide-react';
 import * as React from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import {
   changePasswordSchema,
   formatBRL,
@@ -44,7 +44,15 @@ import {
   TabsTrigger,
   Textarea,
   toast,
+  Avatar,
+  compressImage,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  maskCoordinate,
+  MoneyInput,
 } from '@routeflow/ui';
+import { useConfirm } from '@/components/confirm';
 import { ErrorState, ListSkeleton, toastError } from '@/components/states';
 import { api, upload } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
@@ -64,18 +72,75 @@ import { UsersTab } from './users-tab';
 
 function ProfileTab() {
   const { user, setUser } = useAuth();
+  const client = useQueryClient();
+  const confirm = useConfirm();
+  const gallery = React.useRef<HTMLInputElement>(null);
+  const camera = React.useRef<HTMLInputElement>(null);
   const [name, setName] = React.useState(user?.name ?? '');
+  const [preview, setPreview] = React.useState<{ file: File; url: string } | null>(null);
+  const [preparing, setPreparing] = React.useState(false);
+  const [progress, setProgress] = React.useState<number | null>(null);
   const [pwd, setPwd] = React.useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
   });
   const [errors, setErrors] = React.useState<Record<string, string>>({});
+  React.useEffect(
+    () => () => {
+      if (preview) URL.revokeObjectURL(preview.url);
+    },
+    [preview],
+  );
+  // Atualiza na hora o topo, o menu, o dashboard e a lista de usuários
+  const applyUser = (u: UserDto) => {
+    setUser(u);
+    void client.invalidateQueries({ queryKey: ['users'] });
+  };
+  const choose = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      toast.error('Escolha uma imagem (JPG, PNG ou WebP).');
+      return;
+    }
+    setPreparing(true);
+    try {
+      // compressão no aparelho: envio rápido mesmo com internet móvel
+      const optimized = await compressImage(file, { maxDimension: 1024, quality: 0.88 });
+      setPreview({ file: optimized, url: URL.createObjectURL(optimized) });
+    } catch {
+      toast.error('Não foi possível abrir esta imagem.');
+    } finally {
+      setPreparing(false);
+    }
+  };
+  const saveAvatar = useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append('file', file, file.name);
+      return upload<UserDto>('/users/me/avatar', form, setProgress);
+    },
+    onSuccess: (u) => {
+      applyUser(u);
+      setPreview(null);
+      toast.success('Foto de perfil atualizada.');
+    },
+    onError: toastError,
+    onSettled: () => setProgress(null),
+  });
+  const removeAvatar = useMutation({
+    mutationFn: () => api.delete<UserDto>('/users/me/avatar'),
+    onSuccess: (u) => {
+      applyUser(u);
+      toast.success('Foto removida.');
+    },
+    onError: toastError,
+  });
   const saveName = useMutation({
     mutationFn: () => api.patch<UserDto>('/users/me', { name }),
     onSuccess: (u) => {
-      setUser(u);
-      toast.success('Perfil atualizado.');
+      applyUser(u);
+      toast.success('Dados atualizados.');
     },
     onError: toastError,
   });
@@ -87,25 +152,127 @@ function ProfileTab() {
     },
     onError: toastError,
   });
+  if (!user) return null;
+  const pickFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void choose(e.target.files?.[0]);
+    e.target.value = '';
+  };
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <Card className="lg:col-span-2">
+        <CardContent className="flex flex-col items-center gap-4 pt-6 sm:flex-row">
+          <Avatar
+            name={user.name}
+            src={preview?.url ?? user.avatarUrl}
+            className="size-24 text-3xl sm:size-28"
+          />
+          <div className="flex min-w-0 flex-1 flex-col items-center gap-1 text-center sm:items-start sm:text-left">
+            <p className="text-xl font-bold">{user.name}</p>
+            <Badge tone="neutral">{USER_ROLE_LABEL[user.role]}</Badge>
+            <p className="break-all text-sm text-muted-foreground">{user.email}</p>
+            <div className="mt-2 flex flex-wrap justify-center gap-2 sm:justify-start">
+              {preview ? (
+                <>
+                  <Button
+                    onClick={() => saveAvatar.mutate(preview.file)}
+                    loading={saveAvatar.isPending}
+                  >
+                    {progress != null && progress < 1
+                      ? `Enviando ${Math.round(progress * 100)}%`
+                      : 'Salvar foto'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    onClick={() => setPreview(null)}
+                    disabled={saveAvatar.isPending}
+                  >
+                    Cancelar
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="outline"
+                    loading={preparing}
+                    onClick={() => gallery.current?.click()}
+                  >
+                    <ImagePlus /> {user.avatarUrl ? 'Alterar foto' : 'Adicionar foto'}
+                  </Button>
+                  <Button variant="outline" onClick={() => camera.current?.click()}>
+                    <Camera /> Tirar foto
+                  </Button>
+                  {user.avatarUrl ? (
+                    <Button
+                      variant="ghost"
+                      className="text-danger"
+                      loading={removeAvatar.isPending}
+                      onClick={() =>
+                        void confirm({
+                          title: 'Remover a foto de perfil?',
+                          description: 'As suas iniciais voltam a aparecer no lugar da foto.',
+                          confirmLabel: 'Remover foto',
+                          tone: 'danger',
+                        }).then((ok) => ok && removeAvatar.mutate())
+                      }
+                    >
+                      <Trash /> Remover foto
+                    </Button>
+                  ) : null}
+                </>
+              )}
+            </div>
+            {preview ? (
+              <p className="text-xs text-muted-foreground">
+                Pré-visualização. Ao salvar, a foto é recortada em quadrado e otimizada (WebP, 384
+                px).
+              </p>
+            ) : null}
+            <input
+              ref={gallery}
+              type="file"
+              accept="image/*"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden
+              onChange={pickFile}
+            />
+            <input
+              ref={camera}
+              type="file"
+              accept="image/*"
+              capture="user"
+              className="sr-only"
+              tabIndex={-1}
+              aria-hidden
+              onChange={pickFile}
+            />
+          </div>
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
-          <CardTitle>Perfil</CardTitle>
-          <CardDescription>
-            {user?.email} — {user ? USER_ROLE_LABEL[user.role] : ''}
-          </CardDescription>
+          <CardTitle>Dados pessoais</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <Field label="Nome" htmlFor="profile-name">
             <Input id="profile-name" value={name} onChange={(e) => setName(e.target.value)} />
           </Field>
+          <Field
+            label="E-mail de acesso"
+            htmlFor="profile-email"
+            hint="Para alterar o e-mail, fale com o administrador."
+          >
+            <Input id="profile-email" value={user.email} readOnly disabled />
+          </Field>
+          <Field label="Função" htmlFor="profile-role">
+            <Input id="profile-role" value={USER_ROLE_LABEL[user.role]} readOnly disabled />
+          </Field>
           <Button
             onClick={() => saveName.mutate()}
             loading={saveName.isPending}
-            disabled={name.trim().length < 2}
+            disabled={name.trim().length < 2 || name.trim() === user.name}
           >
-            Salvar nome
+            Salvar dados
           </Button>
         </CardContent>
       </Card>
@@ -151,6 +318,19 @@ function ProfileTab() {
               Alterar senha
             </Button>
           </form>
+        </CardContent>
+      </Card>
+      <Card className="lg:col-span-2">
+        <CardHeader>
+          <CardTitle>Preferências</CardTitle>
+          <CardDescription>
+            Tema claro, escuro ou do sistema — também disponível no menu da sua foto.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline">
+            <Link to="/configuracoes?tab=aparencia">Abrir aparência</Link>
+          </Button>
         </CardContent>
       </Card>
     </div>
@@ -210,7 +390,7 @@ function HomeTab() {
               id="home-lat"
               inputMode="decimal"
               value={form.latitude}
-              onChange={(e) => setForm({ ...form, latitude: e.target.value })}
+              onChange={(e) => setForm({ ...form, latitude: maskCoordinate(e.target.value) })}
             />
           </Field>
           <Field label="Longitude (opcional)" htmlFor="home-lng">
@@ -218,7 +398,7 @@ function HomeTab() {
               id="home-lng"
               inputMode="decimal"
               value={form.longitude}
-              onChange={(e) => setForm({ ...form, longitude: e.target.value })}
+              onChange={(e) => setForm({ ...form, longitude: maskCoordinate(e.target.value) })}
             />
           </Field>
         </div>
@@ -418,13 +598,63 @@ function OperationTab() {
   );
 }
 
+/** "Alterar valor" da tarifa com máscara de reais (substitui o prompt do navegador). */
+function FareValueButton({ fare, onSave }: { fare: FareDto; onSave: (value: number) => void }) {
+  const [open, setOpen] = React.useState(false);
+  const [value, setValue] = React.useState<number | null>(fare.value);
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          setValue(fare.value);
+          setOpen(true);
+        }}
+      >
+        Alterar valor
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent title={`Alterar valor — ${TRANSPORT_TYPE_LABEL[fare.type]}`} size="sm">
+          <Field
+            label="Novo valor"
+            htmlFor={`fare-new-${fare.id}`}
+            hint="Digite só os números: 470 = R$ 4,70"
+          >
+            <MoneyInput
+              id={`fare-new-${fare.id}`}
+              value={value}
+              onValueChange={setValue}
+              autoFocus
+            />
+          </Field>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOpen(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!value}
+              onClick={() => {
+                if (value) onSave(value);
+                setOpen(false);
+              }}
+            >
+              Salvar valor
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function FaresTab({ admin }: { admin: boolean }) {
   const client = useQueryClient();
   const fares = useFares();
   const [draft, setDraft] = React.useState({
     type: 'BUS' as TransportType,
     operator: '',
-    value: '',
+    value: null as number | null,
     effectiveFrom: new Date().toISOString().slice(0, 10),
   });
   const refresh = () => {
@@ -444,13 +674,13 @@ function FaresTab({ admin }: { admin: boolean }) {
     mutationFn: () =>
       api.post('/transport/fares', {
         ...draft,
-        value: Number(draft.value.replace(',', '.')),
+        value: draft.value,
         verified: true,
         active: true,
       }),
     onSuccess: () => {
       toast.success('Tarifa cadastrada.');
-      setDraft({ ...draft, operator: '', value: '' });
+      setDraft({ ...draft, operator: '', value: null });
       refresh();
     },
     onError: toastError,
@@ -506,21 +736,10 @@ function FaresTab({ admin }: { admin: boolean }) {
                         Confirmar
                       </Button>
                     ) : null}
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        const v = window.prompt('Novo valor (R$):', String(f.value));
-                        if (v)
-                          update.mutate({
-                            ...f,
-                            value: Number(v.replace(',', '.')),
-                            verified: true,
-                          });
-                      }}
-                    >
-                      Alterar valor
-                    </Button>
+                    <FareValueButton
+                      fare={f}
+                      onSave={(value) => update.mutate({ ...f, value, verified: true })}
+                    />
                   </span>
                 ) : null,
             },
@@ -577,11 +796,10 @@ function FaresTab({ admin }: { admin: boolean }) {
               />
             </Field>
             <Field label="Valor (R$)" htmlFor="fare-value">
-              <Input
+              <MoneyInput
                 id="fare-value"
-                inputMode="decimal"
                 value={draft.value}
-                onChange={(e) => setDraft({ ...draft, value: e.target.value })}
+                onValueChange={(v) => setDraft({ ...draft, value: v })}
               />
             </Field>
             <Field label="Vigente desde" htmlFor="fare-from">
@@ -607,6 +825,7 @@ function FaresTab({ admin }: { admin: boolean }) {
 }
 
 function SharedTab() {
+  const confirm = useConfirm();
   const client = useQueryClient();
   const shared = useSharedAccess();
   const [form, setForm] = React.useState<{ label: string; scope: SharedScope[] }>({
@@ -766,9 +985,13 @@ function SharedTab() {
                           variant="ghost"
                           className="text-danger"
                           onClick={() =>
-                            window.confirm(
-                              'Revogar este link de vez? Quem tiver o endereço perde o acesso e ele não pode ser reativado.',
-                            ) && revoke.mutate(s.id)
+                            void confirm({
+                              title: 'Revogar este link de vez?',
+                              description:
+                                'Quem tiver o endereço perde o acesso e ele não pode ser reativado. Para pausar, use “Desativado”.',
+                              confirmLabel: 'Revogar',
+                              tone: 'danger',
+                            }).then((ok) => ok && revoke.mutate(s.id))
                           }
                         >
                           Revogar

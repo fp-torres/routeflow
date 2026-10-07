@@ -47,6 +47,7 @@ import {
   toast,
 } from '@routeflow/ui';
 import { ErrorState, PageSkeleton, toastError } from '@/components/states';
+import { useConfirm } from '@/components/confirm';
 import {
   RouteStatusBadge,
   StoreAuthBadge,
@@ -145,6 +146,7 @@ function LegInfo({ leg }: { leg: RouteLegDto | undefined }) {
 }
 
 export function RouteDetailPage() {
+  const confirm = useConfirm();
   const { id = '' } = useParams();
   const route = useRoute(id);
   const client = useQueryClient();
@@ -356,8 +358,11 @@ export function RouteDetailPage() {
                           size="icon-sm"
                           aria-label={`Remover ${stop.store.name} da rota`}
                           onClick={() =>
-                            window.confirm(`Remover ${stop.store.name} desta rota?`) &&
-                            removeStop.mutate(stop.id)
+                            void confirm({
+                              title: `Remover ${stop.store.name} desta rota?`,
+                              confirmLabel: 'Remover',
+                              tone: 'danger',
+                            }).then((ok) => ok && removeStop.mutate(stop.id))
                           }
                         >
                           <Trash />

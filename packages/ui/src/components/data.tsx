@@ -256,21 +256,32 @@ export function SegmentedControl<T extends string>({
   );
 }
 
-export function Avatar({ name, className }: { name: string; className?: string }) {
+/** Avatar com foto; sem foto (ou se a imagem falhar) mostra as iniciais. */
+export function Avatar({ name, src, className }: { name: string; src?: string | null; className?: string }) {
+  const [failed, setFailed] = React.useState(false);
+  React.useEffect(() => setFailed(false), [src]);
   const initials = name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
     .map((p) => p[0]!.toUpperCase())
     .join('');
+  const base = 'inline-flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-full';
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        aria-hidden
+        loading="lazy"
+        decoding="async"
+        onError={() => setFailed(true)}
+        className={cn(base, 'bg-muted object-cover', className)}
+      />
+    );
+  }
   return (
-    <span
-      aria-hidden
-      className={cn(
-        'inline-flex size-9 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-bold text-primary-foreground',
-        className,
-      )}
-    >
+    <span aria-hidden className={cn(base, 'bg-primary text-sm font-bold text-primary-foreground', className)}>
       {initials || '?'}
     </span>
   );

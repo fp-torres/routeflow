@@ -15,9 +15,10 @@ import {
   Store,
   Sun,
   Wallet,
+  UserRound,
 } from 'lucide-react';
 import * as React from 'react';
-import { Link, Navigate, NavLink, Outlet, useLocation } from 'react-router';
+import { Link, Navigate, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { USER_ROLE_LABEL } from '@routeflow/types';
 import {
   Avatar,
@@ -56,7 +57,7 @@ export const SECONDARY_NAV = [
 ];
 
 export function RequireAuth() {
-  const { status } = useAuth();
+  const { status, loggedOut } = useAuth();
   const location = useLocation();
   if (status === 'loading') {
     return (
@@ -68,7 +69,11 @@ export function RequireAuth() {
   if (status === 'anonymous')
     return (
       <Navigate
-        to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`}
+        to={
+          loggedOut
+            ? '/login'
+            : `/login?next=${encodeURIComponent(location.pathname + location.search)}`
+        }
         replace
       />
     );
@@ -124,26 +129,41 @@ function NotificationBell() {
 
 function UserMenu() {
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
   if (!user) return null;
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className="rounded-full" aria-label="Menu do usuário">
-        <Avatar name={user.name} />
+      <DropdownMenuTrigger
+        className="ml-1 rounded-full ring-offset-2 ring-offset-background transition hover:ring-2 hover:ring-primary/40 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+        aria-label={`Menu do usuário: ${user.name}`}
+        title={user.name}
+      >
+        <Avatar name={user.name} src={user.avatarUrl} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent>
-        <DropdownMenuLabel>
-          <span className="block text-sm font-bold text-foreground">{user.name}</span>
-          <span className="block font-normal">{USER_ROLE_LABEL[user.role]}</span>
+      <DropdownMenuContent className="min-w-64">
+        <DropdownMenuLabel className="flex items-center gap-3 py-2">
+          <Avatar name={user.name} src={user.avatarUrl} className="size-11 text-base" />
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-bold text-foreground">{user.name}</span>
+            <span className="block font-normal">{USER_ROLE_LABEL[user.role]}</span>
+          </span>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         <ThemeMenuItems />
         <DropdownMenuSeparator />
         <DropdownMenuItem asChild>
+          <Link to="/configuracoes?tab=perfil">
+            <UserRound /> Meu perfil
+          </Link>
+        </DropdownMenuItem>
+        <DropdownMenuItem asChild>
           <Link to="/configuracoes">
             <Settings /> Configurações
           </Link>
         </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void logout()}>
+        <DropdownMenuItem
+          onSelect={() => void logout().finally(() => navigate('/login', { replace: true }))}
+        >
           <LogOut /> Sair
         </DropdownMenuItem>
       </DropdownMenuContent>

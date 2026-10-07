@@ -4,13 +4,11 @@ import { Link, useParams } from 'react-router';
 import { Alert, Button, EmptyState, PageHeader } from '@routeflow/ui';
 import { ErrorState, ListSkeleton } from '@/components/states';
 import { StoreAuthBadge } from '@/components/status';
-import { useAuth } from '@/lib/auth';
 import { useLetters, useStore } from '@/lib/queries';
 import { LetterDialog, LetterList } from './letter-dialogs';
 
 export function StoreAuthorizationsPage() {
   const { id = '' } = useParams();
-  const { user } = useAuth();
   const store = useStore(id);
   const letters = useLetters({ storeId: id });
   const [creating, setCreating] = React.useState(false);
@@ -68,11 +66,7 @@ export function StoreAuthorizationsPage() {
           }
         />
       ) : (
-        <LetterList
-          letters={letters.data}
-          storeId={id}
-          canDelete={user?.role === 'ADMIN' || user?.role === 'MANAGER'}
-        />
+        <LetterList letters={letters.data} storeId={id} />
       )}
       <LetterDialog open={creating} onOpenChange={setCreating} presetStoreIds={preset} />
     </>

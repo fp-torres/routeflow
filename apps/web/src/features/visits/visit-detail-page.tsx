@@ -59,8 +59,10 @@ import {
   Select,
   Textarea,
   toast,
+  MoneyInput,
 } from '@routeflow/ui';
 import { ErrorState, PageSkeleton, toastError } from '@/components/states';
+import { useConfirm } from '@/components/confirm';
 import { StoreAuthBadge, ValidityBadge, VisitStatusBadge } from '@/components/status';
 import { api, upload } from '@/lib/api';
 import { currentPosition } from '@/lib/geo';
@@ -70,6 +72,7 @@ import { VisitEditDialog } from './visit-edit-dialog';
 type DialogKind = 'note' | 'activity' | 'finish' | 'reschedule' | 'expense' | null;
 
 export function VisitDetailPage() {
+  const confirm = useConfirm();
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const client = useQueryClient();
@@ -88,9 +91,9 @@ export function VisitDetailPage() {
     date: addDaysIso(todayIso(), 1),
     reason: '',
   });
-  const [expense, setExpense] = React.useState<{ type: TransportType; value: string }>({
+  const [expense, setExpense] = React.useState<{ type: TransportType; value: number | null }>({
     type: 'BUS',
-    value: '',
+    value: null,
   });
   const [photo, setPhoto] = React.useState<PhotoDto | null>(null);
 
@@ -169,7 +172,7 @@ export function VisitDetailPage() {
       api.post('/expenses', {
         date: todayIso(),
         type: expense.type,
-        actualValue: Number(expense.value.replace(',', '.')),
+        actualValue: expense.value,
         visitId: id,
       }),
     onSuccess: () => {
@@ -696,12 +699,10 @@ export function VisitDetailPage() {
               </Select>
             </Field>
             <Field label="Valor pago (R$)" htmlFor="expense-value">
-              <Input
+              <MoneyInput
                 id="expense-value"
-                inputMode="decimal"
-                placeholder="0,00"
                 value={expense.value}
-                onChange={(e) => setExpense({ ...expense, value: e.target.value })}
+                onValueChange={(v) => setExpense({ ...expense, value: v })}
               />
             </Field>
           </div>
@@ -712,7 +713,7 @@ export function VisitDetailPage() {
             <Button
               onClick={() => addExpense.mutate()}
               loading={addExpense.isPending}
-              disabled={!(Number(expense.value.replace(',', '.')) > 0)}
+              disabled={!(expense.value && expense.value > 0)}
             >
               Salvar gasto
             </Button>
@@ -735,7 +736,13 @@ export function VisitDetailPage() {
             <DialogFooter>
               <Button
                 variant="danger"
-                onClick={() => window.confirm('Remover esta foto?') && removePhoto.mutate(photo.id)}
+                onClick={() =>
+                  void confirm({
+                    title: 'Remover esta foto?',
+                    confirmLabel: 'Remover',
+                    tone: 'danger',
+                  }).then((ok) => ok && removePhoto.mutate(photo.id))
+                }
                 loading={removePhoto.isPending}
               >
                 <Trash /> Remover foto

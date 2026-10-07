@@ -1,6 +1,18 @@
 import * as React from 'react';
 import { storeCreateSchema, type StoreCreateInput, type StoreDto } from '@routeflow/types';
-import { Button, Checkbox, DialogFooter, Field, Input, Textarea, Select } from '@routeflow/ui';
+import {
+  Button,
+  Checkbox,
+  DialogFooter,
+  Field,
+  Input,
+  Textarea,
+  Select,
+  maskCep,
+  maskCoordinate,
+  maskStoreCode,
+  maskUf,
+} from '@routeflow/ui';
 import { fieldErrors } from '@/lib/forms';
 import { useCatalog } from '@/lib/queries';
 
@@ -44,6 +56,15 @@ function initial(store?: StoreDto): FormState {
   };
 }
 
+/** Máscaras de digitação por campo */
+const MASKS: Partial<Record<keyof FormState, (value: string) => string>> = {
+  code: maskStoreCode,
+  zipCode: maskCep,
+  state: maskUf,
+  latitude: maskCoordinate,
+  longitude: maskCoordinate,
+};
+
 export function StoreForm({
   store,
   submitting,
@@ -59,8 +80,10 @@ export function StoreForm({
   const [form, setForm] = React.useState<FormState>(() => initial(store));
   const [errors, setErrors] = React.useState<Record<string, string>>({});
   const set =
-    (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
-      setForm((f) => ({ ...f, [key]: e.target.value }));
+    (key: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      const raw = e.target.value;
+      setForm((f) => ({ ...f, [key]: MASKS[key]?.(raw) ?? raw }));
+    };
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const start = initial(store);

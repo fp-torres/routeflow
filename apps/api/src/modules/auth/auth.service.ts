@@ -6,6 +6,7 @@ import { DB } from '../../database/database.module';
 import type { Db } from '../../database/prisma.types';
 import { isoInstant } from '../../common/serialize';
 import { AuditService } from '../audit/audit.service';
+import { StorageService } from '../storage/storage.service';
 import { hashPassword, randomToken, sha256, verifyPassword } from './password';
 
 interface Meta {
@@ -21,9 +22,15 @@ type UserRow = {
   active: boolean;
   lastLoginAt: Date | null;
   createdAt: Date;
+  avatarKey: string | null;
 };
 
-export function toUserDto(user: UserRow): UserDto {
+/** Sessão temporária ("Lembrar acesso" desmarcado): o cookie some ao fechar o navegador e, no servidor, expira após 12 h sem uso. */
+const TEMPORARY_SESSION_MS = 12 * 3600 * 1000;
+/** Abas abertas juntas (ex.: navegador restaurando a sessão) renovam ao mesmo tempo: tolerância para não derrubar o acesso. */
+const CONCURRENT_REFRESH_GRACE_MS = 20_000;
+
+export function toUserDto(user: UserRow, signAvatar?: (key: string) => string): UserDto {
   return {
     id: user.id,
     name: user.name,
@@ -32,12 +39,15 @@ export function toUserDto(user: UserRow): UserDto {
     active: user.active,
     lastLoginAt: user.lastLoginAt ? isoInstant(user.lastLoginAt) : null,
     createdAt: isoInstant(user.createdAt),
+    avatarUrl: user.avatarKey && signAvatar ? signAvatar(user.avatarKey) : null,
   };
 }
 
 export interface SessionResult extends AuthResponse {
   refreshToken: string;
   refreshExpiresAt: Date;
+  /** true = "Lembrar acesso" (cookie com validade); false = cookie de sessão do navegador */
+  persistent: boolean;
 }
 
 /**
@@ -55,9 +65,18 @@ export class AuthService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly jwt: JwtService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
-  async login(email: string, password: string, meta: Meta): Promise<SessionResult> {
+  /** URL assinada da foto de perfil (a chave muda a cada nova foto, então o cache nunca fica velho). */
+  readonly signAvatar = (key: string) => this.storage.signedUrl(key, { fileName: 'avatar.webp' });
+
+  async login(
+    email: string,
+    password: string,
+    meta: Meta,
+    remember = false,
+  ): Promise<SessionResult> {
     const user = await this.db.user.findUnique({ where: { email: email.toLowerCase() } });
     const valid = user
       ? await verifyPassword(password, user.passwordHash)
@@ -81,23 +100,28 @@ export class AuthService {
       entity: 'auth',
       entityId: user.id,
       action: 'auth.login',
+      metadata: { remember },
       ...meta,
     });
-    return this.issueSession(updated, meta);
+    return this.issueSession(updated, meta, { persistent: remember });
   }
 
   private async issueSession(
     user: UserRow,
     meta: Meta,
-    replacing?: string,
+    { persistent, replacing }: { persistent: boolean; replacing?: string },
   ): Promise<SessionResult> {
     const refreshToken = randomToken();
-    const refreshExpiresAt = new Date(Date.now() + this.config.auth.refreshTtlDays * 86_400_000);
+    const refreshExpiresAt = new Date(
+      Date.now() +
+        (persistent ? this.config.auth.refreshTtlDays * 86_400_000 : TEMPORARY_SESSION_MS),
+    );
     const created = await this.db.refreshToken.create({
       data: {
         userId: user.id,
         tokenHash: sha256(refreshToken),
         expiresAt: refreshExpiresAt,
+        persistent,
         userAgent: meta.userAgent,
         ipAddress: meta.ipAddress,
       },
@@ -116,9 +140,10 @@ export class AuthService {
     return {
       accessToken,
       expiresIn: this.config.auth.accessTtlSeconds,
-      user: toUserDto(user),
+      user: toUserDto(user, this.signAvatar),
       refreshToken,
       refreshExpiresAt,
+      persistent,
     };
   }
 
@@ -129,7 +154,12 @@ export class AuthService {
       include: { user: true },
     });
     if (!stored) throw new UnauthorizedException('Sessão expirada. Entre novamente.');
-    if (stored.revokedAt) {
+    if (stored.revokedAt && stored.replacedById) {
+      const concurrent = Date.now() - stored.revokedAt.getTime() < CONCURRENT_REFRESH_GRACE_MS;
+      if (concurrent && stored.user.active && stored.expiresAt > new Date()) {
+        // outra aba acabou de renovar com o mesmo token: nova sessão, sem derrubar as demais
+        return this.issueSession(stored.user, meta, { persistent: stored.persistent });
+      }
       // Reuso de token já rotacionado: possível vazamento -> encerra todas as sessões
       await this.db.refreshToken.updateMany({
         where: { userId: stored.userId, revokedAt: null },
@@ -143,9 +173,14 @@ export class AuthService {
       });
       throw new UnauthorizedException('Sessão encerrada por segurança. Entre novamente.');
     }
+    // Encerrada por "Sair", troca de senha ou administrador: apenas pede login
+    if (stored.revokedAt) throw new UnauthorizedException('Sessão encerrada. Entre novamente.');
     if (stored.expiresAt < new Date() || !stored.user.active)
       throw new UnauthorizedException('Sessão expirada. Entre novamente.');
-    return this.issueSession(stored.user, meta, stored.id);
+    return this.issueSession(stored.user, meta, {
+      persistent: stored.persistent,
+      replacing: stored.id,
+    });
   }
 
   async logout(rawToken: string | undefined, meta: Meta): Promise<void> {

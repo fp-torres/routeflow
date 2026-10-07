@@ -13,7 +13,15 @@ import {
   Patch,
   Post,
   Req,
+  Delete,
+  UnsupportedMediaTypeException,
+  UploadedFile,
+  UseInterceptors,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
+import sharp from 'sharp';
 import {
   changePasswordSchema,
   isoToUtcDate,
@@ -40,6 +48,10 @@ import { AuditService } from '../audit/audit.service';
 import { AuthModule, REFRESH_COOKIE } from '../auth/auth.module';
 import { AuthService, toUserDto } from '../auth/auth.service';
 import { hashPassword, sha256 } from '../auth/password';
+import { StorageService } from '../storage/storage.service';
+import { detectImageKind, type UploadedFile as UploadedFileType } from '../../common/uploads';
+
+const AVATAR_SIZE = 384;
 
 export interface TransferOperationResult {
   routes: number;
@@ -63,18 +75,22 @@ export class UsersController {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
     private readonly auth: AuthService,
     private readonly audit: AuditService,
+    private readonly storage: StorageService,
   ) {}
 
   @Get()
   @Roles('MANAGER')
   async list() {
     const users = await this.db.user.findMany({ orderBy: [{ active: 'desc' }, { name: 'asc' }] });
-    return users.map(toUserDto);
+    return users.map((u) => toUserDto(u, this.auth.signAvatar));
   }
 
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
-    return toUserDto(await this.db.user.findUniqueOrThrow({ where: { id: user.id } }));
+    return toUserDto(
+      await this.db.user.findUniqueOrThrow({ where: { id: user.id } }),
+      this.auth.signAvatar,
+    );
   }
 
   @Patch('me')
@@ -92,7 +108,7 @@ export class UsersController {
       entityId: user.id,
       action: 'user.update_profile',
     });
-    return toUserDto(updated);
+    return toUserDto(updated, this.auth.signAvatar);
   }
 
   @Post('me/password')
@@ -118,6 +134,79 @@ export class UsersController {
     });
   }
 
+  /**
+   * Foto de perfil: valida o tipo real do arquivo, corrige a orientação, recorta em quadrado
+   * priorizando a área de interesse (rosto), reduz para 384×384, converte para WebP e remove
+   * metadados (inclusive GPS). A foto anterior é apagada.
+   */
+  @Post('me/avatar')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      storage: memoryStorage(),
+      limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+    }),
+  )
+  async uploadAvatar(
+    @UploadedFile() file: UploadedFileType | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    if (!file) throw new BadRequestException('Selecione uma imagem.');
+    if (!detectImageKind(file.buffer)) {
+      throw new UnsupportedMediaTypeException('Envie uma imagem JPG, PNG, WebP ou AVIF.');
+    }
+    let optimized: Buffer;
+    try {
+      optimized = await sharp(file.buffer, { failOn: 'none', limitInputPixels: 100_000_000 })
+        .rotate()
+        .resize(AVATAR_SIZE, AVATAR_SIZE, { fit: 'cover', position: sharp.strategy.attention })
+        .webp({ quality: 82 })
+        .toBuffer();
+    } catch {
+      throw new UnsupportedMediaTypeException(
+        'Não foi possível ler esta imagem. Tente outra foto (JPG ou PNG).',
+      );
+    }
+    const key = `avatars/${user.id}/${randomUUID()}.webp`;
+    await this.storage.put(key, optimized);
+    const previous = await this.db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { avatarKey: true },
+    });
+    const updated = await this.db.user.update({
+      where: { id: user.id },
+      data: { avatarKey: key, avatarUpdatedAt: new Date() },
+    });
+    if (previous.avatarKey) await this.storage.delete(previous.avatarKey).catch(() => undefined);
+    void this.audit.log({
+      userId: user.id,
+      entity: 'user',
+      entityId: user.id,
+      action: 'user.avatar_update',
+      metadata: { originalSize: file.size, optimizedSize: optimized.length },
+    });
+    return toUserDto(updated, this.auth.signAvatar);
+  }
+
+  @Delete('me/avatar')
+  async removeAvatar(@CurrentUser() user: AuthUser) {
+    const previous = await this.db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      select: { avatarKey: true },
+    });
+    const updated = await this.db.user.update({
+      where: { id: user.id },
+      data: { avatarKey: null, avatarUpdatedAt: new Date() },
+    });
+    if (previous.avatarKey) await this.storage.delete(previous.avatarKey).catch(() => undefined);
+    void this.audit.log({
+      userId: user.id,
+      entity: 'user',
+      entityId: user.id,
+      action: 'user.avatar_remove',
+    });
+    return toUserDto(updated, this.auth.signAvatar);
+  }
+
   @Post()
   @Roles('ADMIN')
   async create(
@@ -141,7 +230,7 @@ export class UsersController {
       action: 'user.create',
       metadata: { email: created.email, role: created.role },
     });
-    return toUserDto(created);
+    return toUserDto(created, this.auth.signAvatar);
   }
 
   private async revokeSessions(userId: string) {
@@ -160,6 +249,13 @@ export class UsersController {
   ) {
     const target = await this.db.user.findUnique({ where: { id } });
     if (!target) throw new NotFoundException('Usuário não encontrado.');
+    if (body.email && body.email !== target.email) {
+      const taken = await this.db.user.findUnique({
+        where: { email: body.email },
+        select: { id: true },
+      });
+      if (taken) throw new ConflictException('Já existe um usuário com este e-mail.');
+    }
     const losesAdmin = (body.role !== undefined && body.role !== 'ADMIN') || body.active === false;
     if (id === actor.id && losesAdmin) {
       throw new BadRequestException('Você não pode remover o seu próprio acesso de administrador.');
@@ -175,6 +271,7 @@ export class UsersController {
       where: { id },
       data: {
         ...(body.name !== undefined ? { name: body.name } : {}),
+        ...(body.email !== undefined ? { email: body.email } : {}),
         ...(body.role !== undefined ? { role: body.role } : {}),
         ...(body.active !== undefined ? { active: body.active } : {}),
       },
@@ -188,7 +285,7 @@ export class UsersController {
       action: 'user.update',
       metadata: body,
     });
-    return toUserDto(updated);
+    return toUserDto(updated, this.auth.signAvatar);
   }
 
   @Post(':id/password')

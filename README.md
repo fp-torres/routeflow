@@ -11,16 +11,17 @@ RouteFlow centraliza a operação de um promotor que visita lojas (inicialmente 
 
 ## O que foi validado
 
-| Verificação                                                                | Resultado                                                                                                                                    |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Importação da planilha real (`data/Controle_Profissional_de_Visitas.xlsx`) | 43 lojas, 43 visitas, 5 rotas, roteiro semanal e endereço de casa — em **PostgreSQL e MariaDB**                                              |
-| Idempotência (reimportar)                                                  | 2ª execução: 0 criados / 0 atualizados nos dois bancos                                                                                       |
-| Testes de API ponta a ponta (18 cenários)                                  | 18/18 no PostgreSQL 16 e 18/18 no MariaDB 10.11 (inclui cartas multi-loja, edição após finalizar, usuários/permissões e links sem expiração) |
-| Testes unitários                                                           | API 7/7, tipos/domínio 19/19 (leitura da carta, otimizador exato), design system 5/5, web 2/2                                                |
-| Lint (ESLint) e tipos (TypeScript strict)                                  | sem erros                                                                                                                                    |
-| Responsividade (Chromium)                                                  | 16 telas × 10 larguras (320–1920 px): 0 rolagens horizontais, 0 erros de console                                                             |
-| Carta real da Drogaria Venancio (PDF)                                      | 41 filiais e datas lidas no navegador; 29/34 lojas da operação cobertas; V95, V120, V134, V34 e V108 apontadas como fora da carta            |
-| Pacote de produção                                                         | `npm install --omit=dev` + `NODE_ENV=production` + MariaDB: API, SPA e PDF funcionando                                                       |
+| Verificação                                                                | Resultado                                                                                                                         |
+| -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Importação da planilha real (`data/Controle_Profissional_de_Visitas.xlsx`) | 43 lojas, 43 visitas, 5 rotas, roteiro semanal e endereço de casa — em **PostgreSQL e MariaDB**                                   |
+| Idempotência (reimportar)                                                  | 2ª execução: 0 criados / 0 atualizados nos dois bancos                                                                            |
+| Testes de API ponta a ponta (20 cenários)                                  | 20/20 no PostgreSQL 16 e 20/20 no MariaDB 10.11 (inclui “Lembrar acesso”, foto de perfil, cartas multi-loja, usuários/permissões) |
+| Testes unitários                                                           | API 7/7, tipos/domínio 29/29 (carta, otimizador, saudação/fuso), design system 8/8 (máscaras), web 2/2                            |
+| Sessão no navegador (Chromium)                                             | 4 cenários: desmarcado → pede login ao reabrir; marcado → entra direto ao reabrir; Sair → pede login; sessão inválida → login     |
+| Lint (ESLint) e tipos (TypeScript strict)                                  | sem erros                                                                                                                         |
+| Responsividade (Chromium)                                                  | 16 telas × 10 larguras (320–1920 px): 0 rolagens horizontais, 0 erros de console                                                  |
+| Carta real da Drogaria Venancio (PDF)                                      | 41 filiais e datas lidas no navegador; 29/34 lojas da operação cobertas; V95, V120, V134, V34 e V108 apontadas como fora da carta |
+| Pacote de produção                                                         | `npm install --omit=dev` + `NODE_ENV=production` + MariaDB: API, SPA e PDF funcionando                                            |
 
 ## Funcionalidades
 
@@ -38,6 +39,8 @@ RouteFlow centraliza a operação de um promotor que visita lojas (inicialmente 
 - **Usuários e permissões** — Administrador (tudo), Gestor (acompanha a operação, relatórios e links públicos) e Funcionário (opera o próprio dia). O administrador cria usuários, redefine senhas, desativa acessos, **transfere a operação** (roteiros, rotas, visitas e endereço de casa) e acompanha o dia de cada funcionário (“visualizando”).
 - **Painel público** — `/public/dashboard/:token`, somente leitura, sem login e **sem expiração**: funciona até ser desativado (reversível) ou revogado (definitivo); o link pode ser copiado de novo a qualquer momento. Escopos: visitas, fotos, autorizações, despesas, rotas.
 - **Geocodificação automática** — latitude/longitude das lojas e da casa obtidas sozinhas (OpenStreetMap, gratuito; ou Google), restritas ao município do Rio, ao iniciar a API e a cada 6 horas.
+- **Acesso e perfil** — “Lembrar acesso” de verdade: marcado, o refresh token fica em cookie HttpOnly com validade (30 dias, renovado a cada uso) e a pessoa entra direto ao reabrir o navegador; desmarcado, o cookie é de sessão (some ao fechar o navegador). “Sair” revoga a sessão no servidor. Foto de perfil otimizada (WebP 384×384, sem metadados) no topo, no menu, no dashboard e na lista de usuários, com iniciais quando não há foto. Saudação por horário de Brasília: “Bom dia/Boa tarde/Boa noite, Maria — Quarta-feira, 07 de outubro”.
+- **Máscaras de digitação** — valores em reais digitando só números (470 → R$ 4,70; 50000 → R$ 500,00), CEP (00000-000), UF, código de loja e coordenadas. Confirmações em diálogo próprio (funcionam também no app instalado).
 - **Notificações internas, auditoria, PWA, dark/light/sistema, mobile-first.**
 
 ## Stack

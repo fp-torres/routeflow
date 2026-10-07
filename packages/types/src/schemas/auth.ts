@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const loginSchema = z.object({
   email: z.email({ error: 'Informe um e-mail válido.' }).trim().toLowerCase(),
   password: z.string().min(1, 'Informe a senha.').max(200),
+  // "Lembrar acesso": sessão persistente (cookie HttpOnly com validade) x sessão do navegador
+  remember: z.boolean().default(false),
 });
 export type LoginInput = z.infer<typeof loginSchema>;
 
@@ -48,6 +50,7 @@ export type UserCreateInput = z.infer<typeof userCreateSchema>;
 
 export const userUpdateSchema = z.object({
   name: z.string().trim().min(2).max(120).optional(),
+  email: z.email({ error: 'Informe um e-mail válido.' }).trim().toLowerCase().max(191).optional(),
   role: roleSchema.optional(),
   active: z.boolean().optional(),
 });

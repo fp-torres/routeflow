@@ -18,7 +18,7 @@ import { configureApp } from '../src/app.setup';
 import { loadConfig } from '../src/config/env';
 import { DB } from '../src/database/database.module';
 import type { Db } from '../src/database/prisma.types';
-import { hashPassword } from '../src/modules/auth/password';
+import { hashPassword, sha256 } from '../src/modules/auth/password';
 import { SpreadsheetImporter } from '../src/modules/importer/spreadsheet-importer';
 import { NotificationsService } from '../src/modules/notifications/notifications.service';
 
@@ -146,7 +146,15 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .set('Cookie', refreshCookie)
       .expect(200);
     expect(refreshed.body.accessToken).toBeTruthy();
+    // reuso de um token já rotacionado, fora da tolerância de abas simultâneas (20 s):
+    // tratado como vazamento — todas as sessões do usuário são encerradas
+    await db.refreshToken.update({
+      where: { tokenHash: sha256(refreshCookie.slice('rf_rt='.length)) },
+      data: { revokedAt: new Date(Date.now() - 60_000) },
+    });
     await http().post('/api/auth/refresh').set('Cookie', refreshCookie).expect(401);
+    const rotatedCookie = String(refreshed.headers['set-cookie']).split(';')[0]!;
+    await http().post('/api/auth/refresh').set('Cookie', rotatedCookie).expect(401);
     const again = await http()
       .post('/api/auth/login')
       .send({ email: 'felipe@routeflow.test', password: 'Teste@123456' })
@@ -443,10 +451,24 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .field('title', 'Sem lojas')
       .attach('file', await pdfBuffer('x'), { filename: 'x.pdf', contentType: 'application/pdf' })
       .expect(400);
+    // tirar uma loja da carta; ao tirar a última, a carta é excluída
+    const partial = await http()
+      .delete(`/api/authorizations/${multi.body.id}/stores/${v72.id}`)
+      .set(auth())
+      .expect(200);
+    expect(partial.body.letter.stores.map((s: { code: string }) => s.code)).toEqual(['V9']);
     const v9Info = (await http().get(`/api/stores/${v9.id}`).set(auth()).expect(200)).body
       .authorization;
     expect(v9Info).toMatchObject({ required: true, hasValid: true, validity: 'VALID' });
     // Cristal não exige carta; a exceção por loja continua possível
+    const last = await http()
+      .delete(`/api/authorizations/${multi.body.id}/stores/${v9.id}`)
+      .set(auth())
+      .expect(200);
+    expect(last.body).toEqual({ deleted: true, letter: null });
+    const v72Info = (await http().get(`/api/stores/${v72.id}`).set(auth()).expect(200)).body
+      .authorization;
+    expect(v72Info).toMatchObject({ required: true, hasValid: false });
     const malibu = byCode('CRI-DROGARIA-MALIBU');
     expect(malibu.authorization).toMatchObject({
       required: false,
@@ -621,6 +643,72 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
     );
   });
 
+  it('"Lembrar acesso": sessão persistente ou temporária, e "Sair" encerra de verdade', async () => {
+    const credentials = { email: 'felipe@routeflow.test', password: 'Teste@123456' };
+    const refreshCookie = (res: { headers: Record<string, unknown> }) =>
+      ([] as string[])
+        .concat((res.headers['set-cookie'] as string[]) ?? [])
+        .find((c) => c.startsWith('rf_rt='))!;
+    // desmarcado: cookie de sessão (sem validade) — some ao fechar o navegador
+    const temporary = await http().post('/api/auth/login').send(credentials).expect(200);
+    expect(refreshCookie(temporary)).toMatch(/HttpOnly/i);
+    expect(refreshCookie(temporary)).not.toMatch(/Expires=/i);
+    // marcado: cookie com validade (~30 dias) — continua após fechar o navegador/reiniciar
+    const remembered = await http()
+      .post('/api/auth/login')
+      .send({ ...credentials, remember: true })
+      .expect(200);
+    const cookie = refreshCookie(remembered);
+    expect(Date.parse(/Expires=([^;]+)/i.exec(cookie)![1]!) - Date.now()).toBeGreaterThan(
+      29 * 86_400_000,
+    );
+    // reabrir o sistema: a renovação restaura o acesso e mantém a persistência (token rotacionado)
+    const first = cookie.split(';')[0]!;
+    const reopened = await http().post('/api/auth/refresh').set('Cookie', first).expect(200);
+    expect(reopened.body.user.email).toBe('felipe@routeflow.test');
+    const rotated = refreshCookie(reopened);
+    expect(rotated).toMatch(/Expires=/i);
+    expect(rotated.split(';')[0]).not.toBe(first);
+    // outra aba renovando ao mesmo tempo com o token anterior não derruba o acesso
+    await http().post('/api/auth/refresh').set('Cookie', first).expect(200);
+    // Sair: revoga a sessão e apaga os cookies; o cookie antigo não entra mais
+    const current = rotated.split(';')[0]!;
+    const out = await http().post('/api/auth/logout').set('Cookie', current).expect(204);
+    expect(String(out.headers['set-cookie'])).toMatch(/rf_rt=;/);
+    await http().post('/api/auth/refresh').set('Cookie', current).expect(401);
+    // sessão inválida -> 401 (o app leva para /login)
+    await http().post('/api/auth/refresh').set('Cookie', 'rf_rt=token-invalido').expect(401);
+  });
+
+  it('salva a foto de perfil otimizada, mostra em /me e permite remover', async () => {
+    const photo = await sharp({
+      create: { width: 3000, height: 2000, channels: 3, background: '#7aa64c' },
+    })
+      .jpeg({ quality: 95 })
+      .toBuffer();
+    const uploaded = await http()
+      .post('/api/users/me/avatar')
+      .set(auth())
+      .attach('file', photo, { filename: 'eu.jpg', contentType: 'image/jpeg' })
+      .expect(201);
+    expect(uploaded.body.avatarUrl).toBeTruthy();
+    const image = await http().get(uploaded.body.avatarUrl).expect(200);
+    expect(image.headers['content-type']).toBe('image/webp');
+    const meta = await sharp(image.body as Buffer).metadata();
+    expect([meta.width, meta.height]).toEqual([384, 384]);
+    expect((image.body as Buffer).length).toBeLessThan(photo.length / 10);
+    const me = await http().get('/api/auth/me').set(auth()).expect(200);
+    expect(me.body.avatarUrl).toBe(uploaded.body.avatarUrl);
+    await http()
+      .post('/api/users/me/avatar')
+      .set(auth())
+      .attach('file', Buffer.from('não é imagem'), 'x.jpg')
+      .expect(415);
+    const removed = await http().delete('/api/users/me/avatar').set(auth()).expect(200);
+    expect(removed.body.avatarUrl).toBeNull();
+    await http().get(uploaded.body.avatarUrl).expect(404);
+  });
+
   it('cria usuária funcionária com permissões restritas e transfere a operação', async () => {
     const me = (await http().get('/api/users/me').set(auth()).expect(200)).body;
     const created = await http()
@@ -645,6 +733,9 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .expect(200);
     const maria = { Authorization: `Bearer ${login.body.accessToken}` };
     await http().get('/api/users').set(maria).expect(403);
+    // qualquer perfil pode excluir uma carta (exclusão lógica, com histórico)
+    await http().delete(`/api/authorizations/${letterId}`).set(maria).expect(204);
+    await http().get(`/api/authorizations/${letterId}`).set(auth()).expect(404);
     await http()
       .post('/api/users')
       .set(maria)

@@ -49,6 +49,8 @@ export interface UserDto extends UserRef {
   active: boolean;
   lastLoginAt: string | null;
   createdAt: string;
+  /** Foto de perfil (URL assinada, muda a cada nova foto); null = usar as iniciais */
+  avatarUrl: string | null;
 }
 
 export interface AuthResponse {

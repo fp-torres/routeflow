@@ -117,15 +117,18 @@ enum VisitActivityType {
 // ----------------------------- Usuários ------------------------------
 
 model User {
-  id           String    @id @default(uuid()) @db.VarChar(36)
-  name         String    @db.VarChar(120)
-  email        String    @unique @db.VarChar(191)
-  passwordHash String    @db.VarChar(255)
-  role         UserRole  @default(EMPLOYEE)
-  active       Boolean   @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  name            String    @db.VarChar(120)
+  email           String    @unique @db.VarChar(191)
+  passwordHash    String    @db.VarChar(255)
+  role            UserRole  @default(EMPLOYEE)
+  active          Boolean   @default(true)
+  lastLoginAt     DateTime?
+  // Foto de perfil otimizada (WebP 384×384) no StorageService
+  avatarKey       String?   @db.VarChar(255)
+  avatarUpdatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 
   refreshTokens   RefreshToken[]
   homeAddresses   HomeAddress[]
@@ -149,6 +152,8 @@ model RefreshToken {
   userId       String    @db.VarChar(36)
   tokenHash    String    @unique @db.VarChar(128)
   expiresAt    DateTime
+  // "Lembrar acesso": cookie persistente (sobrevive ao fechar o navegador) x cookie de sessão
+  persistent   Boolean   @default(false)
   revokedAt    DateTime?
   replacedById String?   @db.VarChar(36)
   userAgent    String?   @db.VarChar(255)

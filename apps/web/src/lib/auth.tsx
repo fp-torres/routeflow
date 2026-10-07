@@ -8,9 +8,11 @@ type Status = 'loading' | 'authenticated' | 'anonymous';
 interface AuthState {
   user: UserDto | null;
   status: Status;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, remember: boolean) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: UserDto) => void;
+  /** true depois de "Sair": a tela de login abre sem destino de retorno */
+  loggedOut: boolean;
 }
 
 const AuthContext = React.createContext<AuthState | null>(null);
@@ -18,6 +20,7 @@ const AuthContext = React.createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<UserDto | null>(null);
   const [status, setStatus] = React.useState<Status>('loading');
+  const [loggedOut, setLoggedOut] = React.useState(false);
   const queryClient = useQueryClient();
 
   React.useEffect(() => {
@@ -36,14 +39,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       user,
       status,
+      loggedOut,
       setUser,
-      login: async (email, password) => {
+      // "Lembrar acesso": o servidor decide a validade do cookie HttpOnly; nada sensível fica no navegador
+      login: async (email, password, remember) => {
         const session = await request<AuthResponse>('POST', '/auth/login', {
-          body: { email, password },
+          body: { email, password, remember },
           auth: false,
         });
         setAccessToken(session.accessToken);
         setUser(session.user);
+        setLoggedOut(false);
         setStatus('authenticated');
       },
       logout: async () => {
@@ -52,12 +58,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setAccessToken(null);
           setUser(null);
+          setLoggedOut(true);
           setStatus('anonymous');
           queryClient.clear();
+          try {
+            localStorage.removeItem('rf-view-as');
+          } catch {
+            // armazenamento indisponível
+          }
         }
       },
     }),
-    [user, status, queryClient],
+    [user, status, loggedOut, queryClient],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

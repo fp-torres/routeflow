@@ -10,3 +10,5 @@ export * from './components/data';
 export * from './components/calendar';
 export * from './components/uploaders';
 export * from './components/route-line';
+
+export * from './lib/masks';

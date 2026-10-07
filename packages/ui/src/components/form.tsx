@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { cn } from '../lib/cn';
+import { moneyFromInput, moneyToInput } from '../lib/masks';
 
 const control =
   'w-full min-w-0 rounded-md border border-input bg-card px-3 text-[0.95rem] text-foreground placeholder:text-muted-foreground/80 disabled:opacity-60 aria-[invalid=true]:border-danger';
@@ -25,6 +26,30 @@ export const Textarea = React.forwardRef<
 Textarea.displayName = 'Textarea';
 
 /** Select nativo estilizado: melhor experiência no celular. */
+export interface MoneyInputProps
+  extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
+  value: number | null;
+  onValueChange: (value: number | null) => void;
+}
+
+/** Campo de valor em reais: digite só os números (470 → R$ 4,70). */
+export const MoneyInput = React.forwardRef<HTMLInputElement, MoneyInputProps>(
+  ({ value, onValueChange, className, ...props }, ref) => (
+    <Input
+      ref={ref}
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      placeholder="R$ 0,00"
+      value={moneyToInput(value)}
+      onChange={(e) => onValueChange(moneyFromInput(e.target.value))}
+      className={cn('tabular-nums', className)}
+      {...props}
+    />
+  ),
+);
+MoneyInput.displayName = 'MoneyInput';
+
 export const Select = React.forwardRef<
   HTMLSelectElement,
   React.SelectHTMLAttributes<HTMLSelectElement>

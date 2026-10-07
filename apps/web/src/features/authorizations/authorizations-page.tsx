@@ -13,7 +13,6 @@ import {
 } from '@routeflow/ui';
 import { ExportButtons } from '@/components/export-buttons';
 import { ErrorState, ListSkeleton } from '@/components/states';
-import { useAuth } from '@/lib/auth';
 import { useAllStores, useLetters } from '@/lib/queries';
 import { byStoreCode, LetterDialog, LetterList } from './letter-dialogs';
 
@@ -26,7 +25,6 @@ const FILTERS: Record<string, AuthorizationValidity[] | undefined> = {
 };
 
 export function AuthorizationsPage() {
-  const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const filter =
     params.get('validity') && FILTERS[params.get('validity')!] ? params.get('validity')! : 'all';
@@ -132,10 +130,7 @@ export function AuthorizationsPage() {
           }
         />
       ) : (
-        <LetterList
-          letters={letters.data}
-          canDelete={user?.role === 'ADMIN' || user?.role === 'MANAGER'}
-        />
+        <LetterList letters={letters.data} />
       )}
       <LetterDialog open={creating} onOpenChange={setCreating} />
     </>

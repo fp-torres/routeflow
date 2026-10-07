@@ -23,20 +23,27 @@ export class AuthController {
     @Inject(DB) private readonly db: Db,
   ) {}
 
+  /**
+   * "Lembrar acesso" marcado: cookies com validade (sobrevivem ao fechar o navegador/reiniciar).
+   * Desmarcado: cookies de sessão (o navegador apaga ao fechar). O refresh token fica só em
+   * cookie HttpOnly; o banco guarda apenas o hash.
+   */
   private setCookie(res: Response, session: SessionResult): void {
+    const lifetime = session.persistent ? { expires: session.refreshExpiresAt } : {};
+    const secure = this.config.isProduction || this.config.trustProxy;
     res.cookie(REFRESH_COOKIE, session.refreshToken, {
       httpOnly: true,
-      secure: this.config.isProduction || this.config.trustProxy,
+      secure,
       sameSite: 'strict',
       path: '/api/auth',
-      expires: session.refreshExpiresAt,
+      ...lifetime,
     });
     res.cookie(SESSION_HINT_COOKIE, '1', {
       httpOnly: false,
-      secure: this.config.isProduction || this.config.trustProxy,
+      secure,
       sameSite: 'strict',
       path: '/',
-      expires: session.refreshExpiresAt,
+      ...lifetime,
     });
   }
 
@@ -58,7 +65,12 @@ export class AuthController {
     @Req() req: AppRequest,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const session = await this.auth.login(body.email, body.password, requestMeta(req));
+    const session = await this.auth.login(
+      body.email,
+      body.password,
+      requestMeta(req),
+      body.remember,
+    );
     this.setCookie(res, session);
     return this.body(session);
   }
@@ -91,7 +103,10 @@ export class AuthController {
 
   @Get('me')
   async me(@CurrentUser() user: AuthUser) {
-    return toUserDto(await this.db.user.findUniqueOrThrow({ where: { id: user.id } }));
+    return toUserDto(
+      await this.db.user.findUniqueOrThrow({ where: { id: user.id } }),
+      this.auth.signAvatar,
+    );
   }
 }
 

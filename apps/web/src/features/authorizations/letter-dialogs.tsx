@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Download, ExternalLink, Pencil, RefreshCw, ScrollText, Trash } from 'lucide-react';
+import { Download, ExternalLink, Pencil, RefreshCw, ScrollText, Trash, Unlink } from 'lucide-react';
 import * as React from 'react';
 import { Link } from 'react-router';
 import {
@@ -33,6 +33,7 @@ import {
   Textarea,
   toast,
 } from '@routeflow/ui';
+import { useConfirm } from '@/components/confirm';
 import { toastError } from '@/components/states';
 import { ValidityBadge } from '@/components/status';
 import { api, upload } from '@/lib/api';
@@ -465,13 +466,12 @@ export function LetterDialog({
 export function LetterList({
   letters,
   storeId,
-  canDelete,
 }: {
   letters: AuthorizationLetterDto[];
   storeId?: string;
-  canDelete: boolean;
 }) {
   const refresh = useRefreshLetters();
+  const confirm = useConfirm();
   const [editing, setEditing] = React.useState<AuthorizationLetterDto | null>(null);
   const [historyOf, setHistoryOf] = React.useState<string | null>(null);
   const history = useLetterHistory(historyOf);
@@ -493,7 +493,16 @@ export function LetterList({
   const remove = useMutation({
     mutationFn: (letterId: string) => api.delete(`/authorizations/${letterId}`),
     onSuccess: () => {
-      toast.success('Carta excluída.');
+      toast.success('Carta excluída. O histórico continua disponível na auditoria.');
+      void refresh();
+    },
+    onError: toastError,
+  });
+  const removeStore = useMutation({
+    mutationFn: ({ letterId, store }: { letterId: string; store: string }) =>
+      api.delete<{ deleted: boolean }>(`/authorizations/${letterId}/stores/${store}`),
+    onSuccess: () => {
+      toast.success('Loja removida da carta.');
       void refresh();
     },
     onError: toastError,
@@ -592,20 +601,39 @@ export function LetterList({
                 <Button size="sm" variant="outline" onClick={() => setHistoryOf(l.id)}>
                   <ScrollText /> Histórico
                 </Button>
-                {canDelete ? (
+                {storeId && l.stores.length > 1 ? (
                   <Button
                     size="sm"
-                    variant="ghost"
-                    className="text-danger"
+                    variant="outline"
+                    loading={removeStore.isPending}
                     onClick={() =>
-                      window.confirm(
-                        `Excluir a carta "${l.title}" (${l.stores.length} loja(s))? O histórico é mantido.`,
-                      ) && remove.mutate(l.id)
+                      void confirm({
+                        title: `Remover esta loja da carta?`,
+                        description: `A carta "${l.title}" continua valendo para as outras ${l.stores.length - 1} loja(s).`,
+                        confirmLabel: 'Remover desta loja',
+                        tone: 'danger',
+                      }).then((ok) => ok && removeStore.mutate({ letterId: l.id, store: storeId }))
                     }
                   >
-                    <Trash /> Excluir
+                    <Unlink /> Remover desta loja
                   </Button>
                 ) : null}
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-danger"
+                  loading={remove.isPending && remove.variables === l.id}
+                  onClick={() =>
+                    void confirm({
+                      title: `Excluir a carta "${l.title}"?`,
+                      description: `Ela deixa de valer para ${l.stores.length === 1 ? 'a loja' : `as ${l.stores.length} lojas`}. O arquivo e o histórico ficam guardados para auditoria.`,
+                      confirmLabel: 'Excluir carta',
+                      tone: 'danger',
+                    }).then((ok) => ok && remove.mutate(l.id))
+                  }
+                >
+                  <Trash /> Excluir
+                </Button>
               </div>
             </li>
           );

@@ -6,6 +6,7 @@ import { ApiError } from '@/lib/api';
 import { AuthProvider } from '@/lib/auth';
 import { ThemeProvider, useTheme } from '@/lib/theme';
 import { ViewAsProvider } from '@/lib/view-as';
+import { ConfirmProvider } from './components/confirm';
 import { PageSkeleton } from './components/states';
 import { router } from './router';
 
@@ -32,16 +33,18 @@ export function App() {
         <AuthProvider>
           <ViewAsProvider>
             <TooltipProvider delayDuration={300}>
-              <Suspense
-                fallback={
-                  <div className="p-6">
-                    <PageSkeleton />
-                  </div>
-                }
-              >
-                <RouterProvider router={router} />
-              </Suspense>
-              <ThemedToaster />
+              <ConfirmProvider>
+                <Suspense
+                  fallback={
+                    <div className="p-6">
+                      <PageSkeleton />
+                    </div>
+                  }
+                >
+                  <RouterProvider router={router} />
+                </Suspense>
+                <ThemedToaster />
+              </ConfirmProvider>
             </TooltipProvider>
           </ViewAsProvider>
         </AuthProvider>

@@ -14,7 +14,6 @@ import {
   formatBRL,
   formatDistance,
   formatDuration,
-  formatLongDateBR,
   formatTimeBR,
   startOfMonthIso,
   todayIso,
@@ -24,7 +23,6 @@ import {
   Button,
   ChartCard,
   EmptyState,
-  PageHeader,
   Progress,
   RouteStrip,
   StatCard,
@@ -39,7 +37,7 @@ import { ManagerPanel } from '@/components/manager-panel';
 import { PeriodPicker, type PeriodPreset } from '@/components/period';
 import { ErrorState, PageSkeleton } from '@/components/states';
 import { StoreAuthBadge, VisitStatusBadge, visitState } from '@/components/status';
-import { useAuth } from '@/lib/auth';
+import { DashboardGreeting } from '@/components/greeting';
 import { useDashboard, useManagerMetrics } from '@/lib/queries';
 
 function TodayCard() {
@@ -130,7 +128,7 @@ function TodayCard() {
             className="border-white/30 bg-transparent text-white hover:bg-white/10"
           >
             <Link to={`/rotas/${route.id}`}>
-              <Navigation /> Abrir rota completa
+              <Navigation /> Ver rota do dia
             </Link>
           </Button>
         </div>
@@ -326,17 +324,12 @@ function ManagerView() {
 }
 
 export function DashboardPage() {
-  const { user } = useAuth();
-  const today = todayIso();
   React.useEffect(() => {
     document.title = 'Início — RouteFlow';
   }, []);
   return (
     <>
-      <PageHeader
-        title={`Olá, ${user?.name.split(' ')[0] ?? ''} 👋`}
-        description={formatLongDateBR(today)}
-      />
+      <DashboardGreeting />
       <Tabs defaultValue="day" className="flex flex-col gap-4">
         <TabsList className="sm:max-w-sm">
           <TabsTrigger value="day">Meu dia</TabsTrigger>

@@ -34,8 +34,9 @@ apps/api/src
 
 1. `POST /api/auth/login` valida a senha (bcrypt, custo 12) e devolve um **access token JWT** (15 min, mantido só em memória no navegador) + cookie **httpOnly** `rf_rt` com o refresh token (`Path=/api/auth`, `SameSite=Strict`, `Secure` em produção).
 2. O banco guarda apenas o **hash SHA-256** do refresh token. Cada renovação **rotaciona** o token; reutilizar um token já trocado encerra todas as sessões do usuário.
-3. O cookie não sensível `rf_session=1` só informa ao frontend que existe sessão a renovar (evita chamadas 401 desnecessárias).
-4. `JwtAuthGuard` (global) protege todas as rotas, exceto as marcadas com `@Public()`; `RolesGuard` aplica `@Roles()` — ADMIN tem acesso total, MANAGER enxerga toda a operação, EMPLOYEE vê os próprios dados.
+3. **“Lembrar acesso”**: marcado, os cookies têm validade (30 dias, renovada a cada uso) e sobrevivem ao fechar o navegador; desmarcado, são cookies de sessão (o navegador apaga ao fechar) e a sessão expira no servidor após 12 h sem uso. A escolha fica gravada no próprio refresh token (`persistent`) e é mantida em cada rotação. Abas abertas juntas que renovam com o mesmo token dentro de 20 s não derrubam o acesso; fora disso, o reuso de um token rotacionado encerra todas as sessões. “Sair” revoga o token no servidor e apaga os cookies.
+4. O cookie não sensível `rf_session=1` só informa ao frontend que existe sessão a renovar (evita chamadas 401 desnecessárias).
+5. `JwtAuthGuard` (global) protege todas as rotas, exceto as marcadas com `@Public()`; `RolesGuard` aplica `@Roles()` — ADMIN tem acesso total, MANAGER enxerga toda a operação, EMPLOYEE vê os próprios dados.
 
 ## Planejamento de rotas
 

@@ -3,20 +3,39 @@ import { LogIn } from 'lucide-react';
 import * as React from 'react';
 import { useForm } from 'react-hook-form';
 import { Navigate, useNavigate, useSearchParams } from 'react-router';
-import { loginSchema, type LoginInput } from '@routeflow/types';
-import { Alert, Button, Field, Input } from '@routeflow/ui';
+import { loginSchema } from '@routeflow/types';
+import { Alert, Button, Checkbox, Field, Input } from '@routeflow/ui';
 import { Wordmark } from '@/components/brand';
 import { errorMessage } from '@/components/states';
 import { useAuth } from '@/lib/auth';
+
+const REMEMBER_KEY = 'rf-remember';
+
+/** Só a preferência da caixa (não guarda senha nem token). */
+function rememberPreference(): boolean {
+  try {
+    return localStorage.getItem(REMEMBER_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function saveRememberPreference(value: boolean) {
+  try {
+    localStorage.setItem(REMEMBER_KEY, value ? '1' : '0');
+  } catch {
+    // armazenamento indisponível
+  }
+}
 
 export function LoginPage() {
   const { login, status } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [error, setError] = React.useState<string | null>(null);
-  const form = useForm<LoginInput>({
+  const form = useForm({
     resolver: zodResolver(loginSchema),
-    defaultValues: { email: '', password: '' },
+    defaultValues: { email: '', password: '', remember: rememberPreference() },
   });
   const next = params.get('next')?.startsWith('/') ? params.get('next')! : '/dashboard';
 
@@ -28,7 +47,8 @@ export function LoginPage() {
   const onSubmit = form.handleSubmit(async (values) => {
     setError(null);
     try {
-      await login(values.email, values.password);
+      await login(values.email, values.password, values.remember);
+      saveRememberPreference(values.remember);
       navigate(next, { replace: true });
     } catch (e) {
       setError(errorMessage(e));
@@ -105,6 +125,19 @@ export function LoginPage() {
                 {...form.register('password')}
               />
             </Field>
+            <Checkbox
+              id="remember"
+              label={
+                <span className="flex flex-col">
+                  <span className="font-semibold">Lembrar acesso</span>
+                  <span className="text-xs text-muted-foreground">
+                    Continua conectado neste aparelho (até 30 dias sem uso). Não marque em
+                    computadores compartilhados.
+                  </span>
+                </span>
+              }
+              {...form.register('remember')}
+            />
             <Button type="submit" size="lg" loading={form.formState.isSubmitting} block>
               <LogIn /> Entrar
             </Button>

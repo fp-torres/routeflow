@@ -28,11 +28,13 @@ import {
   Select,
   StatCard,
   toast,
+  MoneyInput,
 } from '@routeflow/ui';
 import { MoneyLineChart } from '@/components/charts';
 import { ExportButtons } from '@/components/export-buttons';
 import { PeriodPicker, type PeriodPreset } from '@/components/period';
 import { ErrorState, ListSkeleton, toastError } from '@/components/states';
+import { useConfirm } from '@/components/confirm';
 import { api } from '@/lib/api';
 import { useExpenses, useExpenseSummary, useInvalidateOperation } from '@/lib/queries';
 
@@ -40,13 +42,12 @@ interface FormState {
   date: string;
   type: TransportType;
   description: string;
-  estimatedValue: string;
-  actualValue: string;
+  estimatedValue: number | null;
+  actualValue: number | null;
 }
 
-const num = (v: string) => (v.trim() ? Number(v.replace(',', '.')) : null);
-
 export function ExpensesPage() {
+  const confirm = useConfirm();
   const invalidate = useInvalidateOperation();
   const [period, setPeriod] = React.useState<{ preset: PeriodPreset; from: string; to: string }>({
     preset: 'month',
@@ -61,8 +62,8 @@ export function ExpensesPage() {
     date: todayIso(),
     type: 'BUS',
     description: '',
-    estimatedValue: '',
-    actualValue: '',
+    estimatedValue: null,
+    actualValue: null,
   });
   React.useEffect(() => {
     document.title = 'Despesas — RouteFlow';
@@ -74,10 +75,16 @@ export function ExpensesPage() {
             date: expense.date,
             type: expense.type,
             description: expense.description ?? '',
-            estimatedValue: expense.estimatedValue?.toString() ?? '',
-            actualValue: expense.actualValue?.toString() ?? '',
+            estimatedValue: expense.estimatedValue ?? null,
+            actualValue: expense.actualValue ?? null,
           }
-        : { date: todayIso(), type: 'BUS', description: '', estimatedValue: '', actualValue: '' },
+        : {
+            date: todayIso(),
+            type: 'BUS',
+            description: '',
+            estimatedValue: null,
+            actualValue: null,
+          },
     );
     setEditing(expense ?? 'new');
   };
@@ -87,8 +94,8 @@ export function ExpensesPage() {
         date: form.date,
         type: form.type,
         description: form.description || null,
-        estimatedValue: num(form.estimatedValue),
-        actualValue: num(form.actualValue),
+        estimatedValue: form.estimatedValue,
+        actualValue: form.actualValue,
       };
       return editing && editing !== 'new'
         ? api.patch(`/expenses/${editing.id}`, body)
@@ -234,7 +241,13 @@ export function ExpensesPage() {
                       size="icon-sm"
                       variant="ghost"
                       aria-label="Excluir despesa"
-                      onClick={() => window.confirm('Excluir esta despesa?') && remove.mutate(e.id)}
+                      onClick={() =>
+                        void confirm({
+                          title: 'Excluir esta despesa?',
+                          confirmLabel: 'Excluir',
+                          tone: 'danger',
+                        }).then((ok) => ok && remove.mutate(e.id))
+                      }
                     >
                       <Trash />
                     </Button>
@@ -307,21 +320,17 @@ export function ExpensesPage() {
                 </Select>
               </Field>
               <Field label="Valor pago (R$)" htmlFor="exp-actual">
-                <Input
+                <MoneyInput
                   id="exp-actual"
-                  inputMode="decimal"
                   value={form.actualValue}
-                  onChange={(e) => setForm({ ...form, actualValue: e.target.value })}
-                  placeholder="0,00"
+                  onValueChange={(v) => setForm({ ...form, actualValue: v })}
                 />
               </Field>
               <Field label="Valor estimado (R$)" htmlFor="exp-est">
-                <Input
+                <MoneyInput
                   id="exp-est"
-                  inputMode="decimal"
                   value={form.estimatedValue}
-                  onChange={(e) => setForm({ ...form, estimatedValue: e.target.value })}
-                  placeholder="0,00"
+                  onValueChange={(v) => setForm({ ...form, estimatedValue: v })}
                 />
               </Field>
             </div>
@@ -341,7 +350,7 @@ export function ExpensesPage() {
             <Button
               onClick={() => save.mutate()}
               loading={save.isPending}
-              disabled={num(form.actualValue) == null && num(form.estimatedValue) == null}
+              disabled={form.actualValue == null && form.estimatedValue == null}
             >
               Salvar despesa
             </Button>

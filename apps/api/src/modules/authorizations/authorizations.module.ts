@@ -25,7 +25,7 @@ import {
   type LetterUpdateInput,
 } from '@routeflow/types';
 import { loadConfig } from '../../config/env';
-import { CurrentUser, Roles } from '../../common/decorators';
+import { CurrentUser } from '../../common/decorators';
 import type { AuthUser } from '../../common/auth-user';
 import { ZodPipe } from '../../common/zod.pipe';
 import type { UploadedFile as UploadedFileType } from '../../common/uploads';
@@ -97,11 +97,21 @@ export class AuthorizationsController {
     return this.letters.replaceFile(id, file, user);
   }
 
+  /** Exclusão lógica (qualquer perfil): o histórico e o arquivo ficam para auditoria. */
   @Delete('authorizations/:id')
-  @Roles('MANAGER')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     await this.letters.remove(id, user);
+  }
+
+  /** Tira uma loja da carta; se for a última, a carta é excluída (logicamente). */
+  @Delete('authorizations/:id/stores/:storeId')
+  removeStore(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('storeId', ParseUUIDPipe) storeId: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.letters.removeStore(id, storeId, user);
   }
 
   @Get('authorizations/:id/history')

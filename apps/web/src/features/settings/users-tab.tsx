@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { ArrowRightLeft, Copy, KeyRound, UserPlus, Wand } from 'lucide-react';
+import { ArrowRightLeft, Copy, KeyRound, UserPlus, Wand, Pencil } from 'lucide-react';
 import * as React from 'react';
 import {
   formatDateTimeBR,
@@ -66,6 +66,7 @@ export function UsersTab() {
   const users = useUsers();
   const [creating, setCreating] = React.useState(false);
   const [resetting, setResetting] = React.useState<UserDto | null>(null);
+  const [editing, setEditing] = React.useState<UserDto | null>(null);
   const [transferTo, setTransferTo] = React.useState<UserDto | null>(null);
   const update = useMutation({
     mutationFn: ({ id, body }: { id: string; body: { role?: UserRole; active?: boolean } }) =>
@@ -102,7 +103,7 @@ export function UsersTab() {
                 const self = u.id === me?.id;
                 return (
                   <li key={u.id} className="flex flex-wrap items-center gap-3 py-3">
-                    <Avatar name={u.name} />
+                    <Avatar name={u.name} src={u.avatarUrl} />
                     <div className="min-w-0 flex-1">
                       <p className="flex flex-wrap items-center gap-2 font-semibold">
                         {u.name}
@@ -137,6 +138,9 @@ export function UsersTab() {
                       onCheckedChange={(v) => update.mutate({ id: u.id, body: { active: v } })}
                     />
                     <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setEditing(u)}>
+                        <Pencil /> Editar
+                      </Button>
                       <Button size="sm" variant="outline" onClick={() => setResetting(u)}>
                         <KeyRound /> Senha
                       </Button>
@@ -158,6 +162,7 @@ export function UsersTab() {
       </Card>
       <CreateUserDialog open={creating} onOpenChange={setCreating} />
       <ResetPasswordDialog user={resetting} onClose={() => setResetting(null)} />
+      <EditUserDialog user={editing} onClose={() => setEditing(null)} />
       <TransferDialog
         target={transferTo}
         users={users.data ?? []}
@@ -456,6 +461,62 @@ function TransferDialog({
                 disabled={!fromUserId}
               >
                 Transferir
+              </Button>
+            </DialogFooter>
+          </div>
+        </DialogContent>
+      ) : null}
+    </Dialog>
+  );
+}
+
+function EditUserDialog({ user, onClose }: { user: UserDto | null; onClose: () => void }) {
+  const client = useQueryClient();
+  const { user: me, setUser } = useAuth();
+  const [values, setValues] = React.useState({ name: '', email: '' });
+  React.useEffect(() => {
+    if (user) setValues({ name: user.name, email: user.email });
+  }, [user]);
+  const save = useMutation({
+    mutationFn: () => api.patch<UserDto>(`/users/${user!.id}`, values),
+    onSuccess: (u) => {
+      if (u.id === me?.id) setUser(u);
+      void client.invalidateQueries({ queryKey: ['users'] });
+      toast.success('Dados do usuário atualizados.');
+      onClose();
+    },
+    onError: toastError,
+  });
+  return (
+    <Dialog open={!!user} onOpenChange={(o) => !o && onClose()}>
+      {user ? (
+        <DialogContent title={`Editar — ${user.name}`} description="O e-mail é o login de acesso.">
+          <div className="flex flex-col gap-3">
+            <Field label="Nome" htmlFor="eu-name">
+              <Input
+                id="eu-name"
+                value={values.name}
+                onChange={(e) => setValues({ ...values, name: e.target.value })}
+              />
+            </Field>
+            <Field label="E-mail (login)" htmlFor="eu-email">
+              <Input
+                id="eu-email"
+                type="email"
+                value={values.email}
+                onChange={(e) => setValues({ ...values, email: e.target.value })}
+              />
+            </Field>
+            <DialogFooter>
+              <Button variant="ghost" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => save.mutate()}
+                loading={save.isPending}
+                disabled={values.name.trim().length < 2 || !values.email.includes('@')}
+              >
+                Salvar
               </Button>
             </DialogFooter>
           </div>

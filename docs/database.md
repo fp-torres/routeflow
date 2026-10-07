@@ -55,6 +55,7 @@ Os campos `fileUrl`/`thumbnailUrl` guardam a **chave** do arquivo no StorageServ
 ## Migrations
 
 - `20261007000000_init`: modelo inicial.
+- `20261009000000_remember_me_avatar`: “Lembrar acesso” (`refresh_tokens.persistent`) e foto de perfil (`users.avatarKey`).
 - `20261008000000_multistore_letters_transit`: cartas com várias lojas (migra as cartas existentes), exigência de carta por loja, status de geocodificação, itinerários de transporte por trecho e token cifrado dos links públicos.
 
 - A migration inicial PostgreSQL foi gerada pelo motor oficial do Prisma.
