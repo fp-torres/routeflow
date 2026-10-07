@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Module, Query } from '@nestjs/common';
+import { Controller, Get, Inject, Module, Query, ParseUUIDPipe } from '@nestjs/common';
 import { z } from 'zod';
 import { endOfMonthIso, isoDateSchema, startOfMonthIso, todayIso } from '@routeflow/types';
 import { APP_CONFIG, type AppConfig } from '../../config/env';
@@ -22,8 +22,11 @@ export class DashboardController {
   ) {}
 
   @Get()
-  employee(@CurrentUser() user: AuthUser) {
-    return this.dashboard.employee(user);
+  employee(
+    @CurrentUser() user: AuthUser,
+    @Query('employeeId', new ParseUUIDPipe({ optional: true })) employeeId?: string,
+  ) {
+    return this.dashboard.employee(user, employeeId);
   }
 
   @Get('manager')

@@ -75,7 +75,7 @@ export class RoutesController {
     @Body(new ZodPipe(routeGenerateSchema)) body: RouteGenerateInput,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.routes.generate(body.from, body.to, body.overwrite, user);
+    return this.routes.generate(body.from, body.to, body.overwrite, user, body.employeeId);
   }
 
   @Get(':id')

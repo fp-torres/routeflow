@@ -76,6 +76,8 @@ export const AUTHORIZATION_STATUSES = values(AuthorizationStatus);
 
 /** Situação calculada de uma carta de autorização em relação à data de hoje. */
 export const AuthorizationValidity = {
+  /** A loja não exige carta (regra da rede ou da loja). */
+  NOT_REQUIRED: 'NOT_REQUIRED',
   VALID: 'VALID',
   EXPIRING: 'EXPIRING',
   CRITICAL: 'CRITICAL',
@@ -140,3 +142,15 @@ export type ReportType = (typeof ReportType)[keyof typeof ReportType];
 export const REPORT_TYPES = values(ReportType);
 
 export type Tone = 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'critical';
+
+/** Etapas de um itinerário de transporte público. */
+export const TransitStepMode = {
+  WALK: 'WALK',
+  BUS: 'BUS',
+  METRO: 'METRO',
+  TRAIN: 'TRAIN',
+  TRAM: 'TRAM',
+  FERRY: 'FERRY',
+  OTHER: 'OTHER',
+} as const;
+export type TransitStepMode = (typeof TransitStepMode)[keyof typeof TransitStepMode];

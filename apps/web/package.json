@@ -21,6 +21,7 @@
     "@routeflow/ui": "*",
     "@tanstack/react-query": "^5.104.1",
     "lucide-react": "^1.52.0",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-hook-form": "^7.89.0",

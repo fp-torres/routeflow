@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ArrowUpRight,
   Bus,
-  ExternalLink,
   Footprints,
   House,
   MapPin,
@@ -11,6 +10,12 @@ import {
   TrainFront,
   Trash,
   Waypoints,
+  ChevronRight,
+  MapPinned,
+  Navigation,
+  Ship,
+  TramFront,
+  type LucideIcon,
 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useParams } from 'react-router';
@@ -19,10 +24,11 @@ import {
   formatDistance,
   formatDuration,
   formatLongDateBR,
-  TRANSPORT_MODE_LABEL,
   type OptimizationPreviewDto,
   type RouteDetailDto,
   type RouteLegDto,
+  TRANSIT_STEP_LABEL,
+  type TransitStepMode,
 } from '@routeflow/types';
 import {
   Alert,
@@ -52,45 +58,88 @@ import { api } from '@/lib/api';
 import { keys, useInvalidateOperation, useRoute } from '@/lib/queries';
 import { SortableList } from './sortable';
 
+const STEP_ICON: Record<TransitStepMode, LucideIcon> = {
+  WALK: Footprints,
+  BUS: Bus,
+  METRO: TrainFront,
+  TRAIN: TrainFront,
+  TRAM: TramFront,
+  FERRY: Ship,
+  OTHER: Bus,
+};
+const minutes = (s: number | null) => (s == null ? '' : `${Math.max(1, Math.round(s / 60))} min`);
+
+/** Trecho entre duas paradas: etapas (a pé, ônibus, metrô, trem, VLT), tempo, custo e link do trajeto real. */
 function LegInfo({ leg }: { leg: RouteLegDto | undefined }) {
   if (!leg) return null;
+  const link = (
+    <a
+      href={leg.transitUrl}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline"
+    >
+      Abrir trajeto em transporte público <ArrowUpRight className="size-3.5" />
+    </a>
+  );
   if (leg.mode === null && leg.distanceMeters == null) {
-    return (
-      <div className="ml-[3.25rem] py-1 text-xs">
-        <a
-          href={leg.transitUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline"
-        >
-          Trajeto em transporte público <ArrowUpRight className="size-3.5" />
-        </a>
-      </div>
-    );
+    return <div className="ml-[3.25rem] py-1 text-xs">{link}</div>;
   }
-  const Icon =
-    leg.mode === 'WALKING'
-      ? Footprints
-      : leg.mode === 'METRO' || leg.mode === 'TRAIN'
-        ? TrainFront
-        : Bus;
+  const rides = leg.steps?.filter((st) => st.mode !== 'WALK') ?? [];
   return (
-    <div className="ml-[3.25rem] flex flex-wrap items-center gap-x-3 gap-y-1 py-1 text-xs text-muted-foreground">
-      <span className="inline-flex items-center gap-1">
-        <Icon className="size-3.5" />
-        {leg.summary ?? (leg.mode ? TRANSPORT_MODE_LABEL[leg.mode] : 'Trecho')}
-      </span>
-      {leg.durationSeconds != null ? <span>{formatDuration(leg.durationSeconds)}</span> : null}
-      {leg.distanceMeters != null ? <span>{formatDistance(leg.distanceMeters)}</span> : null}
-      {leg.cost != null ? <span>{formatBRL(leg.cost)}</span> : null}
-      <a
-        href={leg.transitUrl}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-0.5 font-semibold text-primary hover:underline"
-      >
-        Trajeto em transporte público <ArrowUpRight className="size-3.5" />
-      </a>
+    <div className="ml-[3.25rem] flex flex-col gap-1 py-1 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {leg.steps?.length ? (
+          <span
+            className="inline-flex flex-wrap items-center gap-1"
+            title={leg.summary ?? undefined}
+          >
+            {leg.steps.map((step, i) => {
+              const Icon = STEP_ICON[step.mode] ?? Bus;
+              return (
+                <React.Fragment key={i}>
+                  {i > 0 ? <ChevronRight className="size-3 opacity-60" aria-hidden /> : null}
+                  <span
+                    className={
+                      step.mode === 'WALK'
+                        ? 'inline-flex items-center gap-0.5'
+                        : 'inline-flex items-center gap-0.5 rounded bg-muted px-1.5 py-0.5 font-semibold text-foreground'
+                    }
+                  >
+                    <Icon className="size-3.5" aria-hidden />
+                    <span className="sr-only">{TRANSIT_STEP_LABEL[step.mode]} </span>
+                    {step.mode === 'WALK'
+                      ? minutes(step.durationSeconds)
+                      : (step.line ?? TRANSIT_STEP_LABEL[step.mode])}
+                  </span>
+                </React.Fragment>
+              );
+            })}
+          </span>
+        ) : (
+          <span>{leg.summary}</span>
+        )}
+        {leg.durationSeconds != null ? (
+          <span className="font-semibold text-foreground">
+            {formatDuration(leg.durationSeconds)}
+          </span>
+        ) : null}
+        {leg.distanceMeters != null ? <span>{formatDistance(leg.distanceMeters)}</span> : null}
+        {leg.cost != null ? <span>{formatBRL(leg.cost)}</span> : null}
+        {leg.source === 'estimate' ? <span className="italic">estimativa</span> : null}
+      </div>
+      {leg.source === 'google' && rides.length ? (
+        <ul className="flex flex-col gap-0.5">
+          {rides.map((st, i) => (
+            <li key={i}>
+              {TRANSIT_STEP_LABEL[st.mode]} {st.line ?? ''}
+              {st.headsign ? ` (sentido ${st.headsign})` : ''}: {st.from ?? '—'} → {st.to ?? '—'}
+              {st.stopCount ? ` · ${st.stopCount} parada(s)` : ''}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <div>{link}</div>
     </div>
   );
 }
@@ -350,27 +399,43 @@ export function RouteDetailPage() {
         <aside className="flex flex-col gap-3">
           <Card>
             <CardHeader>
-              <CardTitle>Abrir no Google Maps</CardTitle>
+              <CardTitle>Navegação</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-2">
-              {r.fullRouteLinks.map((link) => (
-                <Button
-                  key={link.part}
-                  asChild
-                  variant={link.part === 1 ? 'line' : 'outline'}
-                  block
-                >
-                  <a href={link.url} target="_blank" rel="noreferrer">
-                    <ExternalLink /> Rota completa
-                    {link.totalParts > 1 ? ` (parte ${link.part}/${link.totalParts})` : ''}
-                  </a>
-                </Button>
-              ))}
-              <p className="text-xs text-muted-foreground">
-                Visão geral {r.fullRouteTravelMode === 'driving' ? 'de carro' : 'a pé'} com até 9
-                paradas por link. O Google Maps não aceita paradas múltiplas em transporte público:
-                use “Trajeto em transporte público” em cada trecho.
-              </p>
+              {r.nextStop ? (
+                <>
+                  <Button asChild size="lg" variant="line" block>
+                    <a href={r.nextStop.transitUrl} target="_blank" rel="noreferrer">
+                      <Navigation /> Ir para a próxima loja
+                    </a>
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    <strong className="text-foreground">{r.nextStop.storeName}</strong> — transporte
+                    público a partir da sua localização (ônibus, metrô, trem e integrações, no
+                    Google Maps).
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Todas as visitas desta rota foram finalizadas.
+                </p>
+              )}
+              <div className="mt-1 flex flex-col gap-2 border-t pt-3">
+                {r.fullRouteLinks.map((link) => (
+                  <Button key={link.part} asChild variant="outline" size="sm" block>
+                    <a href={link.url} target="_blank" rel="noreferrer">
+                      <MapPinned /> Ver sequência no mapa
+                      {link.totalParts > 1 ? ` (parte ${link.part}/${link.totalParts})` : ''}
+                    </a>
+                  </Button>
+                ))}
+                <p className="text-xs text-muted-foreground">
+                  Mostra todas as paradas na ordem (
+                  {r.fullRouteTravelMode === 'driving' ? 'traçado de carro' : 'traçado a pé'}). O
+                  Google Maps não traça transporte público com várias paradas — por isso cada trecho
+                  tem o seu link.
+                </p>
+              </div>
             </CardContent>
           </Card>
           <div className="grid grid-cols-2 gap-3">
@@ -395,8 +460,8 @@ export function RouteDetailPage() {
           <p className="text-xs text-muted-foreground">
             Trajetos:{' '}
             {r.legsProvider === 'google'
-              ? 'Google Routes (transporte público)'
-              : 'estimativa local (distância × fator urbano + tarifas cadastradas)'}
+              ? 'itinerários reais do Google (linhas, estações e tempos de transporte público)'
+              : 'estimativa de transporte público (a pé até ~1,2 km; acima disso, caminhada + espera + viagem). Para linhas e horários reais no app, configure a chave do Google Routes'}
             .{r.optimizeHint ? ` ${r.optimizeHint}` : ''}
           </p>
         </aside>
@@ -417,14 +482,51 @@ export function RouteDetailPage() {
             ) : (
               <div className="flex flex-col gap-3">
                 <div className="grid grid-cols-3 gap-2">
-                  <StatCard label="Atual" value={`${preview.currentDistanceKm} km`} />
+                  <StatCard
+                    label="Atual"
+                    value={formatDuration(preview.currentDurationSeconds ?? 0)}
+                    hint={
+                      preview.currentDistanceKm != null
+                        ? `${preview.currentDistanceKm} km`
+                        : undefined
+                    }
+                  />
                   <StatCard
                     label="Proposta"
-                    value={`${preview.proposedDistanceKm} km`}
+                    value={formatDuration(preview.proposedDurationSeconds ?? 0)}
+                    hint={
+                      preview.proposedDistanceKm != null
+                        ? `${preview.proposedDistanceKm} km`
+                        : undefined
+                    }
                     tone="success"
                   />
-                  <StatCard label="Economia" value={`${preview.improvementKm} km`} tone="line" />
+                  <StatCard
+                    label="Economia"
+                    value={
+                      (preview.improvementSeconds ?? 0) > 30
+                        ? formatDuration(preview.improvementSeconds ?? 0)
+                        : '—'
+                    }
+                    tone="line"
+                  />
                 </div>
+                <p className="text-xs text-muted-foreground">
+                  {preview.method === 'exact'
+                    ? 'Melhor ordem possível (todas as combinações avaliadas)'
+                    : 'Ordem otimizada (heurística, rota com muitas paradas)'}{' '}
+                  pelo tempo de transporte público{' '}
+                  {preview.source === 'google' ? 'do Google' : 'estimado'}, saindo de casa e
+                  voltando para casa.
+                  {preview.fixedStops === 1
+                    ? ' A primeira parada (já iniciada ou finalizada) mantém a posição.'
+                    : preview.fixedStops > 1
+                      ? ` As ${preview.fixedStops} primeiras paradas (já iniciadas ou finalizadas) mantêm a posição.`
+                      : ''}
+                </p>
+                {(preview.improvementSeconds ?? 0) <= 30 ? (
+                  <Alert tone="success" title="A ordem atual já é a mais rápida." />
+                ) : null}
                 <ol className="flex flex-col gap-1 text-sm">
                   {preview.proposedOrder.map((sid, i) => (
                     <li key={sid} className="flex gap-2">
@@ -443,7 +545,7 @@ export function RouteDetailPage() {
                 <Button
                   onClick={() => optimize.mutate(true)}
                   loading={optimize.isPending}
-                  disabled={(preview.improvementKm ?? 0) <= 0.01}
+                  disabled={(preview.improvementSeconds ?? 0) <= 30}
                 >
                   Aplicar nova ordem
                 </Button>

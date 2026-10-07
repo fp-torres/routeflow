@@ -178,6 +178,8 @@ export class StoresService {
         latitude: data.latitude ?? null,
         longitude: data.longitude ?? null,
         geocodeSource: data.latitude != null && data.longitude != null ? 'manual' : null,
+        geocodeStatus: data.latitude != null && data.longitude != null ? 'MANUAL' : null,
+        authorizationRequired: data.authorizationRequired ?? null,
         observations: data.observations ?? null,
         active: data.active,
       },
@@ -191,7 +193,8 @@ export class StoresService {
       action: 'store.create',
       metadata: { code, name: store.name },
     });
-    return toStoreDto(store, NO_AUTHORIZATION);
+    const created = await this.letters.summaries([store.id]);
+    return toStoreDto(store, created.get(store.id) ?? NO_AUTHORIZATION);
   }
 
   async update(id: string, input: StoreUpdateInput, user: AuthUser): Promise<StoreDto> {
@@ -219,20 +222,33 @@ export class StoresService {
         ...(data.region !== undefined ? { region: data.region } : {}),
         ...(data.observations !== undefined ? { observations: data.observations } : {}),
         ...(data.active !== undefined ? { active: data.active } : {}),
+        ...(data.authorizationRequired !== undefined
+          ? { authorizationRequired: data.authorizationRequired }
+          : {}),
         ...(coordsProvided
           ? {
               latitude: data.latitude ?? null,
               longitude: data.longitude ?? null,
               geocodeSource: data.latitude != null ? 'manual' : null,
+              geocodeStatus: data.latitude != null ? 'MANUAL' : null,
+              geocodeAttemptedAt: null,
               geocodedAt: null,
             }
           : addressChanged
-            ? { latitude: null, longitude: null, geocodeSource: null, geocodedAt: null }
+            ? {
+                latitude: null,
+                longitude: null,
+                geocodeSource: null,
+                geocodeStatus: null,
+                geocodeAttemptedAt: null,
+                geocodedAt: null,
+              }
             : {}),
       },
     });
     if (addressChanged && !coordsProvided && this.geocoding.isConfigured())
       void this.geocoding.geocodeStore(id);
+    if (coordsProvided || addressChanged) await this.geocoding.invalidateRoutesForStore(id);
     void this.audit.log({
       userId: user.id,
       entity: 'store',

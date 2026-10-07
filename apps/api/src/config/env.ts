@@ -38,7 +38,10 @@ const envSchema = z.object({
   THUMBNAIL_SIZE: z.coerce.number().int().min(120).max(1200).default(480),
   ROUTE_PROVIDER: z.enum(['estimate', 'google']).default('estimate'),
   GOOGLE_MAPS_API_KEY: z.string().optional(),
-  GEOCODING_PROVIDER: z.enum(['none', 'nominatim', 'google']).default('none'),
+  // Coordenadas obtidas automaticamente (OpenStreetMap por padrão; "google" usa GOOGLE_MAPS_API_KEY)
+  GEOCODING_PROVIDER: z.enum(['none', 'nominatim', 'google']).default('nominatim'),
+  // Área de busca (oeste,norte,leste,sul). Padrão: município do Rio de Janeiro. Vazio = sem limite.
+  GEOCODING_VIEWBOX: z.string().default('-43.80,-22.74,-43.08,-23.09'),
   NOMINATIM_BASE_URL: z.url().default('https://nominatim.openstreetmap.org'),
   NOMINATIM_EMAIL: z.string().optional(),
   WEB_DIST_PATH: z.string().optional(),
@@ -75,6 +78,7 @@ export interface AppConfig {
     provider: 'none' | 'nominatim' | 'google';
     nominatimBaseUrl: string;
     nominatimEmail: string | null;
+    viewbox: string | null;
     googleApiKey: string | null;
   };
   webDistPath: string | null;
@@ -194,6 +198,7 @@ export function loadConfig(overrides: Record<string, string | undefined> = {}): 
       provider: env.GEOCODING_PROVIDER,
       nominatimBaseUrl: env.NOMINATIM_BASE_URL.replace(/\/+$/, ''),
       nominatimEmail: env.NOMINATIM_EMAIL ?? null,
+      viewbox: env.GEOCODING_VIEWBOX.trim() || null,
       googleApiKey: env.GOOGLE_MAPS_API_KEY ?? null,
     },
     webDistPath: env.WEB_DIST_PATH ? resolvePath(env.WEB_DIST_PATH) : null,

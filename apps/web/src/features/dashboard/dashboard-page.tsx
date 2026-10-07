@@ -232,6 +232,7 @@ function MyDay() {
             ['Até 7 dias', a.critical, 'text-danger'],
             ['Expiradas', a.expired, 'text-critical'],
             ['Sem carta', a.withoutLetter, 'text-muted-foreground'],
+            ['Não exigida', a.notRequired, 'text-muted-foreground'],
           ].map(([label, value, color]) => (
             <div key={label as string} className="rounded-md bg-muted px-3 py-2">
               <dt className="text-xs text-muted-foreground">{label}</dt>

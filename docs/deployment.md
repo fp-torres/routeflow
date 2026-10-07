@@ -90,3 +90,18 @@ Com esses segredos o workflow envia o pacote por `rsync`, roda `npm install --om
 
 - Cada deploy é um commit na branch `deploy`; para voltar, redeploy de um commit anterior pelo hPanel (ou rode o workflow manualmente em uma versão anterior).
 - Migrations são aditivas; faça backup (o plano tem backup diário) antes de mudanças de schema.
+
+## Transporte público com dados reais (Google Routes API) — opcional
+
+Sem chave, o RouteFlow já abre o trajeto real de transporte público no Google Maps (por trecho e pelo botão “Ir para a próxima loja”) e mostra estimativas rotuladas dentro do app. Para ver **linhas, estações e tempos reais no app** e otimizar com eles:
+
+1. Google Cloud Console › crie um projeto › ative a **Routes API** (e, se quiser, a **Geocoding API**).
+2. Crie uma chave de API e restrinja-a às APIs acima (e, em produção, ao IP do servidor).
+3. Configure `ROUTE_PROVIDER=google` e `GOOGLE_MAPS_API_KEY=...` (opcional: `GEOCODING_PROVIDER=google`).
+4. Reinicie a aplicação e use “Recalcular” na rota.
+
+O Google cobra por uso, com uma cota mensal gratuita — confira os valores atuais no console. Cada rota consulta cada trecho uma vez (recalculado só quando a rota muda), e a otimização usa uma matriz de tempos guardada por 10 minutos. Em qualquer falha do Google, o sistema volta para a estimativa e avisa.
+
+## Atualizando uma instalação existente
+
+`npm run db:deploy` aplica as migrations pendentes (ex.: `20261008000000_multistore_letters_transit`, que converte as cartas existentes para o modelo “uma carta, várias lojas” sem perder dados).

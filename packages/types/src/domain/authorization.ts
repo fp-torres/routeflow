@@ -58,6 +58,7 @@ export function computeLetterValidity(
 /** A carta autoriza a visita hoje? */
 export function isUsableValidity(validity: AuthorizationValidity): boolean {
   return (
+    validity === AuthorizationValidity.NOT_REQUIRED ||
     validity === AuthorizationValidity.VALID ||
     validity === AuthorizationValidity.EXPIRING ||
     validity === AuthorizationValidity.CRITICAL ||
@@ -66,6 +67,7 @@ export function isUsableValidity(validity: AuthorizationValidity): boolean {
 }
 
 const SEVERITY: Record<AuthorizationValidity, number> = {
+  NOT_REQUIRED: -1,
   NO_EXPIRATION: 0,
   VALID: 1,
   EXPIRING: 2,
@@ -116,4 +118,26 @@ export function describeDaysLeft(daysLeft: number | null): string {
   if (daysLeft === 0) return 'Vence hoje';
   if (daysLeft === 1) return 'Vence amanhã';
   return `Vence em ${daysLeft} dias`;
+}
+
+const plainKey = (v: string) =>
+  v
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+
+/**
+ * A loja exige carta de autorização? A regra da loja (true/false) tem precedência;
+ * sem regra própria, vale a lista de redes que exigem carta (Configurações).
+ */
+export function isAuthorizationRequired(
+  store: { network: string; authorizationRequired?: boolean | null },
+  requiredNetworks: readonly string[],
+): boolean {
+  if (store.authorizationRequired === true || store.authorizationRequired === false) {
+    return store.authorizationRequired;
+  }
+  const network = plainKey(store.network);
+  return requiredNetworks.some((n) => plainKey(n) === network);
 }

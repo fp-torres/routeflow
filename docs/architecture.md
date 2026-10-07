@@ -41,15 +41,15 @@ apps/api/src
 
 Precedência para uma data: **rota já existente (alteração na data) > roteiro mensal > roteiro semanal (ciclo) > roteiro padrão**. A agenda mostra visitas "previstas" a partir dos roteiros e o sistema materializa as rotas dos próximos dias (configurável: `autoGenerateRoutes`, `routeGenerationHorizonDays`). Datas passadas nunca são inventadas. Cada parada (`route_stops`) aponta para sua visita (`visits`), e reordenar atualiza as duas.
 
-A **otimização é opcional**: `POST /routes/:id/optimize` devolve uma proposta (vizinho mais próximo + 2-opt sobre o circuito Casa → lojas → Casa) e só altera a ordem com `apply: true`.
+A **otimização é opcional**: `POST /routes/:id/optimize` devolve uma proposta e só altera a ordem com `apply: true`. Ela minimiza a soma dos **tempos de transporte público** do circuito Casa → lojas → Casa (matriz do Google Routes ou do modelo local), de forma **exata** (programação dinâmica de Held-Karp) até 13 paradas pendentes e heurística (vizinho mais próximo + 2-opt) acima disso. Visitas já iniciadas/finalizadas mantêm a posição e o restante é reorganizado a partir da última loja visitada.
 
 ## Provedores plugáveis (sem integrações fingidas)
 
-| Interface       | Implementações                                                                                                  | Configuração                            |
-| --------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
-| `RouteProvider` | `EstimateRouteProvider` (local, rotulado "estimativa"), `GoogleRoutesProvider` (Routes API, transporte público) | `ROUTE_PROVIDER`, `GOOGLE_MAPS_API_KEY` |
-| Geocodificação  | Nominatim (OpenStreetMap, 1 req/s), Google Geocoding                                                            | `GEOCODING_PROVIDER`                    |
-| `StorageDriver` | `LocalStorageDriver` (disco) — S3/R2 implementam a mesma interface                                              | `STORAGE_DRIVER`, `STORAGE_PATH`        |
+| Interface       | Implementações                                                                                                                                                                                  | Configuração                            |
+| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `RouteProvider` | `EstimateRouteProvider` (modelo local de transporte público, rotulado "estimativa"), `GoogleRoutesProvider` (Routes API em TRANSIT: itinerário por trecho + matriz de tempos para a otimização) | `ROUTE_PROVIDER`, `GOOGLE_MAPS_API_KEY` |
+| Geocodificação  | Nominatim (OpenStreetMap, 1 req/s), Google Geocoding                                                                                                                                            | `GEOCODING_PROVIDER`                    |
+| `StorageDriver` | `LocalStorageDriver` (disco) — S3/R2 implementam a mesma interface                                                                                                                              | `STORAGE_DRIVER`, `STORAGE_PATH`        |
 
 Sem chave do Google, nada é simulado: a interface informa que os valores são estimativas e os links do Google Maps (que não exigem chave) continuam funcionando.
 

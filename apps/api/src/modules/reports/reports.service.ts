@@ -254,17 +254,20 @@ export class ReportsService {
         { key: 'validity', header: 'Situação', width: 12, format: 'status' },
         { key: 'daysLeft', header: 'Dias', width: 5, format: 'number', align: 'right' },
       ],
-      rows: letters.map((l) => ({
-        code: l.store?.code ?? null,
-        store: l.store?.name ?? null,
-        network: l.store?.network ?? null,
-        title: l.title,
-        issueDate: l.issueDate,
-        validFrom: l.validFrom,
-        expirationDate: l.expirationDate,
-        validity: AUTHORIZATION_VALIDITY_LABEL[l.validity],
-        daysLeft: l.daysLeft,
-      })),
+      // Uma linha por loja coberta (facilita filtrar no Excel)
+      rows: letters.flatMap((l) =>
+        (l.stores.length ? l.stores : [null]).map((s) => ({
+          code: s?.code ?? null,
+          store: s?.name ?? null,
+          network: s?.network ?? l.network,
+          title: l.title,
+          issueDate: l.issueDate,
+          validFrom: l.validFrom,
+          expirationDate: l.expirationDate,
+          validity: AUTHORIZATION_VALIDITY_LABEL[l.validity],
+          daysLeft: l.daysLeft,
+        })),
+      ),
     };
   }
 

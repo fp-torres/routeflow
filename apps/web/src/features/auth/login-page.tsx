@@ -70,7 +70,7 @@ export function LoginPage() {
         </svg>
         <div>
           <p className="max-w-md text-3xl leading-tight font-bold">
-            Casa, lojas do dia, casa. Tudo registrado no caminho.
+            Tudo registrado no caminho.
           </p>
           <p className="mt-3 max-w-md text-[#c9d4e5]">
             Agenda, rotas, evidências, autorizações e despesas da operação em campo, num só lugar.

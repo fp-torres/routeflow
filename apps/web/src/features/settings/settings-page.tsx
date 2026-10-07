@@ -60,6 +60,7 @@ import {
   useSharedAccess,
 } from '@/lib/queries';
 import { useTheme, type ThemePreference } from '@/lib/theme';
+import { UsersTab } from './users-tab';
 
 function ProfileTab() {
   const { user, setUser } = useAuth();
@@ -316,6 +317,31 @@ function OperationTab() {
             />
           </Field>
         </div>
+        <fieldset className="flex flex-col gap-1">
+          <legend className="text-sm font-semibold">Redes que exigem carta de autorização</legend>
+          <p className="text-xs text-muted-foreground">
+            Lojas das redes desmarcadas aparecem como “Carta não exigida” (ex.: Cristal). Cada loja
+            também pode ter uma exceção no próprio cadastro.
+          </p>
+          <div className="flex flex-wrap gap-x-5">
+            {form.networks.map((n) => (
+              <Checkbox
+                key={n}
+                id={`req-${n}`}
+                label={n}
+                checked={form.authorizationRequiredNetworks.includes(n)}
+                onChange={(e) =>
+                  setForm({
+                    ...form,
+                    authorizationRequiredNetworks: e.target.checked
+                      ? [...form.authorizationRequiredNetworks, n]
+                      : form.authorizationRequiredNetworks.filter((x) => x !== n),
+                  })
+                }
+              />
+            ))}
+          </div>
+        </fieldset>
         <Switch
           id="op-block"
           label="Bloquear visita sem autorização válida"
@@ -343,7 +369,11 @@ function OperationTab() {
               }
             />
           </Field>
-          <Field label="Rota completa no Google Maps" htmlFor="op-mode">
+          <Field
+            label="Mapa da sequência de paradas (visão geral)"
+            htmlFor="op-mode"
+            hint="Os trechos sempre abrem em transporte público."
+          >
             <Select
               id="op-mode"
               value={form.fullRouteTravelMode}
@@ -351,8 +381,8 @@ function OperationTab() {
                 setForm({ ...form, fullRouteTravelMode: e.target.value as 'driving' | 'walking' })
               }
             >
-              <option value="driving">Carro (visão geral)</option>
-              <option value="walking">A pé</option>
+              <option value="walking">A pé (recomendado)</option>
+              <option value="driving">Carro</option>
             </Select>
           </Field>
         </div>
@@ -579,29 +609,34 @@ function FaresTab({ admin }: { admin: boolean }) {
 function SharedTab() {
   const client = useQueryClient();
   const shared = useSharedAccess();
-  const [form, setForm] = React.useState<{
-    label: string;
-    expiresAt: string;
-    scope: SharedScope[];
-  }>({ label: 'Gestor', expiresAt: '', scope: ['visits', 'photos', 'authorizations'] });
+  const [form, setForm] = React.useState<{ label: string; scope: SharedScope[] }>({
+    label: 'Gestor',
+    scope: ['visits', 'photos', 'authorizations'],
+  });
   const [created, setCreated] = React.useState<SharedAccessCreatedDto | null>(null);
+  const invalidate = () => client.invalidateQueries({ queryKey: keys.shared });
   const create = useMutation({
-    mutationFn: () =>
-      api.post<SharedAccessCreatedDto>('/shared-access', {
-        ...form,
-        expiresAt: form.expiresAt || undefined,
-      }),
+    mutationFn: () => api.post<SharedAccessCreatedDto>('/shared-access', form),
     onSuccess: (r) => {
       setCreated(r);
-      void client.invalidateQueries({ queryKey: keys.shared });
+      void invalidate();
+    },
+    onError: toastError,
+  });
+  const toggle = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) =>
+      api.patch(`/shared-access/${id}`, { active }),
+    onSuccess: (_r, v) => {
+      toast.success(v.active ? 'Link reativado.' : 'Link desativado. Reative quando quiser.');
+      void invalidate();
     },
     onError: toastError,
   });
   const revoke = useMutation({
     mutationFn: (id: string) => api.post(`/shared-access/${id}/revoke`),
     onSuccess: () => {
-      toast.success('Link revogado.');
-      void client.invalidateQueries({ queryKey: keys.shared });
+      toast.success('Link revogado definitivamente.');
+      void invalidate();
     },
     onError: toastError,
   });
@@ -619,8 +654,8 @@ function SharedTab() {
         <CardHeader>
           <CardTitle>Novo link público</CardTitle>
           <CardDescription>
-            Painel somente leitura para o empregador/gestor, sem login. O link aparece uma única
-            vez.
+            Painel somente leitura para o empregador/gestor, sem login. O link não expira: continua
+            funcionando até você desativá-lo ou revogá-lo.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
@@ -629,13 +664,6 @@ function SharedTab() {
               id="share-label"
               value={form.label}
               onChange={(e) => setForm({ ...form, label: e.target.value })}
-            />
-          </Field>
-          <Field label="Expira em (opcional)" htmlFor="share-exp">
-            <DatePicker
-              id="share-exp"
-              value={form.expiresAt}
-              onChange={(e) => setForm({ ...form, expiresAt: e.target.value })}
             />
           </Field>
           <fieldset className="flex flex-col">
@@ -665,10 +693,7 @@ function SharedTab() {
             <Link2 /> Gerar link
           </Button>
           {created ? (
-            <Alert
-              tone="success"
-              title="Link criado — copie agora, ele não será exibido novamente."
-            >
+            <Alert tone="success" title="Link criado. Você pode copiá-lo de novo na lista ao lado.">
               <span className="mt-1 block break-all font-mono text-xs text-foreground">
                 {created.url}
               </span>
@@ -695,38 +720,64 @@ function SharedTab() {
             <p className="text-sm text-muted-foreground">Nenhum link criado.</p>
           ) : (
             <ul className="divide-y">
-              {shared.data.map((s) => (
-                <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
-                  <span className="min-w-0">
-                    <span className="block font-semibold">
-                      {s.label}{' '}
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {s.tokenPreview}…
+              {shared.data.map((s) => {
+                const revoked = !!s.revokedAt;
+                return (
+                  <li key={s.id} className="flex flex-col gap-2 py-3">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block font-semibold">
+                          {s.label}{' '}
+                          <span className="font-mono text-xs text-muted-foreground">
+                            {s.tokenPreview}…
+                          </span>
+                        </span>
+                        <span className="block text-xs text-muted-foreground">
+                          {s.scope.map((x) => SHARED_SCOPE_LABEL[x]).join(', ')} — {s.accessCount}{' '}
+                          acesso(s)
+                          {s.lastAccessAt ? ` — último ${formatDateTimeBR(s.lastAccessAt)}` : ''}
+                        </span>
                       </span>
-                    </span>
-                    <span className="block text-xs text-muted-foreground">
-                      {s.scope.map((x) => SHARED_SCOPE_LABEL[x]).join(', ')} — {s.accessCount}{' '}
-                      acesso(s)
-                      {s.expiresAt ? ` — expira ${formatDateTimeBR(s.expiresAt)}` : ''}
-                    </span>
-                  </span>
-                  {s.active ? (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() =>
-                        window.confirm(
-                          'Revogar este link? Quem tiver o endereço perde o acesso.',
-                        ) && revoke.mutate(s.id)
-                      }
-                    >
-                      Revogar
-                    </Button>
-                  ) : (
-                    <Badge>Revogado</Badge>
-                  )}
-                </li>
-              ))}
+                      {revoked ? (
+                        <Badge tone="danger">Revogado</Badge>
+                      ) : (
+                        <Switch
+                          id={`share-active-${s.id}`}
+                          label={s.active ? 'Ativo' : 'Desativado'}
+                          checked={s.active}
+                          disabled={toggle.isPending}
+                          onCheckedChange={(v) => toggle.mutate({ id: s.id, active: v })}
+                        />
+                      )}
+                    </div>
+                    {!revoked ? (
+                      <div className="flex flex-wrap gap-2">
+                        {s.url ? (
+                          <Button size="sm" variant="outline" onClick={() => void copy(s.url!)}>
+                            <Copy /> Copiar link
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">
+                            Criado na versão anterior: o endereço não pode ser exibido de novo.
+                          </span>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-danger"
+                          onClick={() =>
+                            window.confirm(
+                              'Revogar este link de vez? Quem tiver o endereço perde o acesso e ele não pode ser reativado.',
+                            ) && revoke.mutate(s.id)
+                          }
+                        >
+                          Revogar
+                        </Button>
+                      </div>
+                    ) : null}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </CardContent>
@@ -964,6 +1015,7 @@ export function SettingsPage() {
     { value: 'perfil', label: 'Perfil', show: true },
     { value: 'casa', label: 'Endereço de casa', show: true },
     { value: 'aparencia', label: 'Aparência', show: true },
+    { value: 'usuarios', label: 'Usuários', show: admin },
     { value: 'operacao', label: 'Operação', show: admin },
     { value: 'tarifas', label: 'Tarifas', show: true },
     { value: 'links', label: 'Links públicos', show: manager },
@@ -1015,6 +1067,11 @@ export function SettingsPage() {
         {admin ? (
           <TabsContent value="importacao">
             <ImportTab />
+          </TabsContent>
+        ) : null}
+        {admin ? (
+          <TabsContent value="usuarios">
+            <UsersTab />
           </TabsContent>
         ) : null}
         <TabsContent value="integracoes">

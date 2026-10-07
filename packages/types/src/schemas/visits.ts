@@ -30,11 +30,22 @@ export const visitCreateSchema = z.object({
 });
 export type VisitCreateInput = z.infer<typeof visitCreateSchema>;
 
-export const visitUpdateSchema = z.object({
-  notes: optionalText(5000),
-  status: z.enum(VISIT_STATUSES).optional(),
-  statusReason: optionalText(500),
-});
+/** Edição da visita (inclusive depois de finalizada); cada alteração fica no histórico. */
+export const visitUpdateSchema = z
+  .object({
+    notes: optionalText(5000),
+    status: z.enum(VISIT_STATUSES).optional(),
+    statusReason: optionalText(500),
+    startedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+    finishedAt: z.iso.datetime({ offset: true }).nullable().optional(),
+  })
+  .refine(
+    (v) => !v.startedAt || !v.finishedAt || Date.parse(v.startedAt) <= Date.parse(v.finishedAt),
+    {
+      message: 'O término precisa ser depois do início.',
+      path: ['finishedAt'],
+    },
+  );
 export type VisitUpdateInput = z.infer<typeof visitUpdateSchema>;
 
 export const visitStartSchema = geoCaptureSchema;

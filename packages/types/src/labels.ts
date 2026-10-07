@@ -96,6 +96,7 @@ export const PHOTO_CATEGORY_LABEL: Record<PhotoCategory, string> = {
 };
 
 export const AUTHORIZATION_VALIDITY_LABEL: Record<AuthorizationValidity, string> = {
+  NOT_REQUIRED: 'Não exigida',
   VALID: 'Válida',
   EXPIRING: 'Vence em breve',
   CRITICAL: 'Vencimento próximo',
@@ -106,6 +107,7 @@ export const AUTHORIZATION_VALIDITY_LABEL: Record<AuthorizationValidity, string>
 };
 
 export const AUTHORIZATION_VALIDITY_TONE: Record<AuthorizationValidity, Tone> = {
+  NOT_REQUIRED: 'success',
   VALID: 'success',
   EXPIRING: 'warning',
   CRITICAL: 'danger',
@@ -189,3 +191,13 @@ export const MONTH_LABEL = [
   'novembro',
   'dezembro',
 ] as const;
+
+export const TRANSIT_STEP_LABEL: Record<string, string> = {
+  WALK: 'Caminhada',
+  BUS: 'Ônibus',
+  METRO: 'Metrô',
+  TRAIN: 'Trem',
+  TRAM: 'VLT',
+  FERRY: 'Barca',
+  OTHER: 'Transporte',
+};

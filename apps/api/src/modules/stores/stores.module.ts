@@ -96,6 +96,7 @@ export class StoresController {
   }
 
   @Delete(':id')
+  @Roles('MANAGER')
   @HttpCode(204)
   async deactivate(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     await this.stores.deactivate(id, user);

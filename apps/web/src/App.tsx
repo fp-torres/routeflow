@@ -5,6 +5,7 @@ import { Toaster, TooltipProvider } from '@routeflow/ui';
 import { ApiError } from '@/lib/api';
 import { AuthProvider } from '@/lib/auth';
 import { ThemeProvider, useTheme } from '@/lib/theme';
+import { ViewAsProvider } from '@/lib/view-as';
 import { PageSkeleton } from './components/states';
 import { router } from './router';
 
@@ -29,18 +30,20 @@ export function App() {
     <QueryClientProvider client={queryClient}>
       <ThemeProvider>
         <AuthProvider>
-          <TooltipProvider delayDuration={300}>
-            <Suspense
-              fallback={
-                <div className="p-6">
-                  <PageSkeleton />
-                </div>
-              }
-            >
-              <RouterProvider router={router} />
-            </Suspense>
-            <ThemedToaster />
-          </TooltipProvider>
+          <ViewAsProvider>
+            <TooltipProvider delayDuration={300}>
+              <Suspense
+                fallback={
+                  <div className="p-6">
+                    <PageSkeleton />
+                  </div>
+                }
+              >
+                <RouterProvider router={router} />
+              </Suspense>
+              <ThemedToaster />
+            </TooltipProvider>
+          </ViewAsProvider>
         </AuthProvider>
       </ThemeProvider>
     </QueryClientProvider>

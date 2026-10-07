@@ -14,12 +14,14 @@ import {
   hasCoordinates,
   holidayOn,
   isoToUtcDate,
-  optimizeClosedTour,
+  optimizePath,
+  pathCost,
   type IsoDate,
   type OptimizationPreviewDto,
   type RouteCreateInput,
   type RouteDetailDto,
   type RouteLegDto,
+  type TransitStepDto,
   type RouteQuery,
   type RouteSummaryDto,
   type RouteUpdateInput,
@@ -28,13 +30,13 @@ import { DB } from '../../database/database.module';
 import type { Db, Prisma } from '../../database/prisma.types';
 import { canSeeAll, resolveEmployeeId, type AuthUser } from '../../common/auth-user';
 import { NO_AUTHORIZATION, toStoreRef } from '../../common/mappers';
-import { isoDate, isoInstant, money, moneyOrNull } from '../../common/serialize';
+import { isoDate, isoInstant, money, moneyOrNull, safeJsonParse } from '../../common/serialize';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationsService } from '../authorizations/authorizations.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SettingsService } from '../settings/settings.service';
 import { TransportService } from '../transport/transport.module';
-import type { LegPoint, LegResult } from '../transport/route-provider';
+import type { LegPoint, LegResult, TravelMatrix } from '../transport/route-provider';
 import { PlannerService } from './planner.service';
 
 const detailInclude = {
@@ -56,6 +58,22 @@ const detailInclude = {
   },
 } satisfies Prisma.RouteInclude;
 type RouteDetailRow = Prisma.RouteGetPayload<{ include: typeof detailInclude }>;
+
+/** Itinerário gravado por trecho: { source, steps } em JSON. */
+function legMeta(raw: string | null): Pick<RouteLegDto, 'steps' | 'source'> {
+  const value = safeJsonParse<{ source?: string; steps?: TransitStepDto[] } | null>(raw, null);
+  return {
+    steps: Array.isArray(value?.steps) ? value.steps : null,
+    source: value?.source === 'google' || value?.source === 'estimate' ? value.source : null,
+  };
+}
+
+/** Google Maps em transporte público a partir da localização atual do celular. */
+const transitFromHere = (address: string) =>
+  `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}&travelmode=transit`;
+
+const MATRIX_TTL_MS = 10 * 60_000;
+const matrixCache = new Map<string, { at: number; matrix: TravelMatrix }>();
 
 const TERMINAL = ['COMPLETED', 'NOT_COMPLETED', 'RESCHEDULED', 'CANCELLED'] as const;
 
@@ -149,11 +167,7 @@ export class RoutesService {
 
   async detail(id: string, user: AuthUser): Promise<RouteDetailDto> {
     let route = await this.load(id, user);
-    if (
-      !route.legsComputedAt &&
-      route.stops.length > 0 &&
-      this.transport.provider.name === 'estimate'
-    ) {
+    if (!route.legsComputedAt && route.stops.length > 0) {
       await this.computeLegs(route);
       route = await this.load(id, user);
     }
@@ -176,6 +190,7 @@ export class RoutesService {
       durationSeconds: stop.travelDuration,
       cost: moneyOrNull(stop.travelCost),
       summary: stop.travelSummary,
+      ...legMeta(stop.travelSteps),
       transitUrl: legLinks[index]?.url ?? '',
     }));
     if (route.stops.length > 0) {
@@ -188,18 +203,22 @@ export class RoutesService {
         durationSeconds: route.returnDuration,
         cost: moneyOrNull(route.returnTravelCost),
         summary: route.returnSummary,
+        ...legMeta(route.returnSteps),
         transitUrl: legLinks[route.stops.length]?.url ?? '',
       });
     }
     const missing = route.stops.filter((s) => !hasCoordinates(s.store)).map((s) => s.store.name);
     const homeHasCoords = route.startLatitude != null && route.startLongitude != null;
     const optimizeHint = !homeHasCoords
-      ? 'Cadastre as coordenadas do endereço de casa (Configurações) para otimizar a rota.'
+      ? 'O endereço de casa ainda está sem localização (ela é obtida automaticamente). Confira o endereço em Configurações › Casa.'
       : missing.length
-        ? `${missing.length} loja(s) sem coordenadas. Use "Atualizar coordenadas" em Lojas.`
-        : route.stops.length < 3
-          ? 'São necessárias ao menos 3 paradas para otimizar.'
+        ? `${missing.length} loja(s) ainda sem localização — ela é obtida automaticamente; se persistir, confira o endereço.`
+        : route.stops.length < 2
+          ? 'São necessárias ao menos 2 paradas para reorganizar.'
           : null;
+    const next = route.stops.find(
+      (st) => st.visit && (st.visit.status === 'PENDING' || st.visit.status === 'IN_PROGRESS'),
+    );
     return {
       ...this.summary(route),
       startAddress: route.startAddress,
@@ -238,34 +257,58 @@ export class RoutesService {
       canOptimize: optimizeHint === null,
       optimizeHint,
       fullRouteTravelMode: settings.fullRouteTravelMode,
+      optimizedAt: route.optimizedAt ? isoInstant(route.optimizedAt) : null,
+      nextStop:
+        next && next.visit
+          ? {
+              stopId: next.id,
+              visitId: next.visit.id,
+              storeName: next.store.name,
+              transitUrl: transitFromHere(fullAddressForMaps(next.store)),
+            }
+          : null,
     };
   }
 
-  /** Calcula trechos Casa -> lojas -> Casa com o RouteProvider configurado e grava totais. */
+  /** Calcula os trechos Casa → lojas → Casa (transporte público) e grava itinerários e totais. */
   async computeLegs(route: RouteDetailRow): Promise<void> {
     const date = isoDate(route.date);
     const points = [this.homePoint(route), ...route.stops.map((s) => this.storePoint(s.store))];
+    const pairs: Array<[LegPoint, LegPoint]> = route.stops.map((_, i) => [
+      points[i]!,
+      points[i + 1]!,
+    ]);
+    if (route.stops.length) pairs.push([points[points.length - 1]!, points[0]!]);
     const results: LegResult[] = [];
-    for (let i = 0; i < route.stops.length; i += 1)
-      results.push(await this.transport.computeLeg(points[i]!, points[i + 1]!, date));
-    const back = route.stops.length
-      ? await this.transport.computeLeg(points[points.length - 1]!, points[0]!, date)
-      : null;
-    const all = back ? [...results, back] : results;
+    // até 4 consultas simultâneas ao provedor de rotas
+    for (let i = 0; i < pairs.length; i += 4) {
+      results.push(
+        ...(await Promise.all(
+          pairs.slice(i, i + 4).map(([a, b]) => this.transport.computeLeg(a, b, date)),
+        )),
+      );
+    }
+    const legs = results.slice(0, route.stops.length);
+    const back = route.stops.length ? results[results.length - 1]! : null;
     const sum = (values: Array<number | null>) =>
       values.some((v) => v == null) || values.length === 0
         ? null
         : values.reduce<number>((a, v) => a + (v ?? 0), 0);
+    const stepsJson = (r: LegResult | null) =>
+      r && r.steps && r.source !== 'unavailable'
+        ? JSON.stringify({ source: r.source, steps: r.steps })
+        : null;
     await this.db.$transaction([
       ...route.stops.map((stop, i) =>
         this.db.routeStop.update({
           where: { id: stop.id },
           data: {
-            travelDistance: results[i]!.distanceMeters,
-            travelDuration: results[i]!.durationSeconds,
-            transportMode: results[i]!.mode,
-            travelCost: results[i]!.cost,
-            travelSummary: results[i]!.summary?.slice(0, 500) ?? null,
+            travelDistance: legs[i]!.distanceMeters,
+            travelDuration: legs[i]!.durationSeconds,
+            transportMode: legs[i]!.mode,
+            travelCost: legs[i]!.cost,
+            travelSummary: legs[i]!.summary?.slice(0, 500) ?? null,
+            travelSteps: stepsJson(legs[i]!),
           },
         }),
       ),
@@ -277,9 +320,10 @@ export class RoutesService {
           returnTransportMode: back?.mode ?? null,
           returnTravelCost: back?.cost ?? null,
           returnSummary: back?.summary?.slice(0, 500) ?? null,
-          estimatedDistance: sum(all.map((l) => l.distanceMeters)),
-          estimatedDuration: sum(all.map((l) => l.durationSeconds)),
-          estimatedTransportCost: sum(all.map((l) => l.cost)),
+          returnSteps: stepsJson(back),
+          estimatedDistance: sum(results.map((l) => l.distanceMeters)),
+          estimatedDuration: sum(results.map((l) => l.durationSeconds)),
+          estimatedTransportCost: sum(results.map((l) => l.cost)),
           legsProvider: this.transport.provider.name,
           legsComputedAt: new Date(),
         },
@@ -320,23 +364,23 @@ export class RoutesService {
   }
 
   async create(input: RouteCreateInput, user: AuthUser): Promise<RouteDetailDto> {
+    // ADMIN/MANAGER podem criar a rota de outro funcionário ("visualizando como")
+    const employeeId = resolveEmployeeId(user, input.employeeId);
     const existing = await this.db.route.findUnique({
-      where: { employeeId_date: { employeeId: user.id, date: isoToUtcDate(input.date) } },
+      where: { employeeId_date: { employeeId, date: isoToUtcDate(input.date) } },
     });
     if (existing) throw new ConflictException('Já existe uma rota para esta data.');
     const route = input.fromTemplate
-      ? await this.planner.ensureRoute(user.id, input.date)
+      ? await this.planner.ensureRoute(employeeId, input.date)
       : await this.db.route.create({
           data: {
-            employeeId: user.id,
+            employeeId,
             date: isoToUtcDate(input.date),
-            ...(await this.planner
-              .home(user.id)
-              .then((h) => ({
-                startAddress: h.address,
-                startLatitude: h.latitude,
-                startLongitude: h.longitude,
-              }))),
+            ...(await this.planner.home(employeeId).then((h) => ({
+              startAddress: h.address,
+              startLatitude: h.latitude,
+              startLongitude: h.longitude,
+            }))),
           },
         });
     if (input.storeIds.length) {
@@ -491,70 +535,153 @@ export class RoutesService {
     return this.detail(id, user);
   }
 
-  /** Otimização OPCIONAL: retorna a proposta; só altera a ordem com apply=true. */
+  /** Matriz de tempos em transporte público entre casa e lojas (guardada por 10 minutos). */
+  private async travelMatrix(route: RouteDetailRow, points: LegPoint[]): Promise<TravelMatrix> {
+    const key = [
+      route.id,
+      this.transport.provider.name,
+      ...points.map((p) => `${p.latitude},${p.longitude}`),
+    ].join('|');
+    const cached = matrixCache.get(key);
+    if (cached && Date.now() - cached.at < MATRIX_TTL_MS) return cached.matrix;
+    const matrix = await this.transport.computeMatrix(points, isoDate(route.date));
+    matrixCache.set(key, { at: Date.now(), matrix });
+    if (matrixCache.size > 200) matrixCache.delete(matrixCache.keys().next().value!);
+    return matrix;
+  }
+
+  /**
+   * Otimização OPCIONAL pela soma dos tempos de transporte público (Casa → lojas → Casa).
+   * Visitas já iniciadas/finalizadas mantêm a posição; as pendentes são reorganizadas a partir
+   * da última loja visitada. Ótimo exato até 13 paradas pendentes. Só altera com apply=true.
+   */
   async optimize(id: string, apply: boolean, user: AuthUser): Promise<OptimizationPreviewDto> {
     const route = await this.load(id, user);
     const currentOrder = route.stops.map((s) => s.id);
     const missing = route.stops.filter((s) => !hasCoordinates(s.store)).map((s) => s.store.name);
-    const home = { latitude: route.startLatitude, longitude: route.startLongitude };
-    const base = {
+    const base: OptimizationPreviewDto = {
+      applied: false,
+      canOptimize: false,
+      reason: null,
       currentOrder,
       proposedOrder: currentOrder,
       currentDistanceKm: null,
       proposedDistanceKm: null,
       improvementKm: null,
+      currentDurationSeconds: null,
+      proposedDurationSeconds: null,
+      improvementSeconds: null,
+      fixedStops: 0,
+      method: null,
+      source: null,
       missingCoordinates: missing,
     };
-    if (!hasCoordinates(home))
+    if (route.startLatitude == null || route.startLongitude == null) {
       return {
         ...base,
-        applied: false,
-        canOptimize: false,
-        reason: 'Endereço de casa sem coordenadas.',
+        reason:
+          'O endereço de casa ainda está sem localização. Confira o endereço em Configurações › Casa.',
       };
-    if (missing.length)
-      return { ...base, applied: false, canOptimize: false, reason: 'Há lojas sem coordenadas.' };
-    if (route.stops.length < 3)
+    }
+    if (missing.length) {
       return {
         ...base,
-        applied: false,
-        canOptimize: false,
-        reason: 'São necessárias ao menos 3 paradas.',
+        reason: `${missing.length} loja(s) ainda sem localização: ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}.`,
       };
-    const result = optimizeClosedTour(
-      home,
-      route.stops.map((s) => ({
-        id: s.id,
-        latitude: s.store.latitude!,
-        longitude: s.store.longitude!,
-      })),
+    }
+    const isFixed = (s: RouteDetailRow['stops'][number]) =>
+      !!s.visit && s.visit.status !== 'PENDING' && s.visit.status !== 'BLOCKED';
+    const fixed = route.stops.filter(isFixed);
+    const pending = route.stops.filter((s) => !isFixed(s));
+    if (pending.length < 2) {
+      return {
+        ...base,
+        fixedStops: fixed.length,
+        reason: 'Não há paradas pendentes suficientes para reorganizar.',
+      };
+    }
+    const points = [this.homePoint(route), ...route.stops.map((s) => this.storePoint(s.store))];
+    const matrix = await this.travelMatrix(route, points);
+    const indexOf = new Map(route.stops.map((s, i) => [s.id, i + 1]));
+    const start = fixed.length ? indexOf.get(fixed[fixed.length - 1]!.id)! : 0;
+    const result = optimizePath(
+      matrix.seconds,
+      start,
+      0,
+      pending.map((s) => indexOf.get(s.id)!),
     );
-    const shouldApply = apply && result.improvementKm > 0.01;
+    const proposedOrder = [
+      ...fixed.map((s) => s.id),
+      ...result.order.map((i) => route.stops[i - 1]!.id),
+    ];
+    const seconds = (order: string[]) =>
+      pathCost(
+        matrix.seconds,
+        0,
+        0,
+        order.map((sid) => indexOf.get(sid)!),
+      );
+    const km = (order: string[]) => {
+      const idx = [0, ...order.map((sid) => indexOf.get(sid)!), 0];
+      let total = 0;
+      for (let i = 0; i < idx.length - 1; i++) {
+        const m = matrix.meters[idx[i]!]![idx[i + 1]!];
+        if (m == null) return null;
+        total += m;
+      }
+      return Math.round(total / 10) / 100;
+    };
+    const currentSeconds = Math.round(seconds(currentOrder));
+    const proposedSeconds = Math.round(seconds(proposedOrder));
+    const improvementSeconds = currentSeconds - proposedSeconds;
+    const shouldApply = apply && improvementSeconds > 30;
     if (shouldApply) {
-      await this.applyOrder(route, result.order);
+      await this.applyOrder(route, proposedOrder);
+      await this.db.route.update({ where: { id }, data: { optimizedAt: new Date() } });
       void this.audit.log({
         userId: user.id,
         entity: 'route',
         entityId: id,
         action: 'route.optimize',
-        metadata: { improvementKm: result.improvementKm },
+        metadata: { improvementSeconds, source: matrix.source, method: result.method },
       });
     }
+    const currentKm = km(currentOrder);
+    const proposedKm = km(proposedOrder);
     return {
+      ...base,
       applied: shouldApply,
       canOptimize: true,
-      reason: null,
-      currentOrder,
-      proposedOrder: result.order,
-      currentDistanceKm: Math.round(result.originalDistanceKm * 100) / 100,
-      proposedDistanceKm: Math.round(result.distanceKm * 100) / 100,
-      improvementKm: Math.round(result.improvementKm * 100) / 100,
+      proposedOrder,
+      currentDurationSeconds: currentSeconds,
+      proposedDurationSeconds: proposedSeconds,
+      improvementSeconds,
+      currentDistanceKm: currentKm,
+      proposedDistanceKm: proposedKm,
+      improvementKm:
+        currentKm != null && proposedKm != null
+          ? Math.round((currentKm - proposedKm) * 100) / 100
+          : null,
+      fixedStops: fixed.length,
+      method: result.method,
+      source: matrix.source,
       missingCoordinates: [],
     };
   }
 
-  async generate(from: IsoDate, to: IsoDate, overwrite: boolean, user: AuthUser) {
-    const result = await this.planner.generate(user.id, from, to, overwrite);
+  async generate(
+    from: IsoDate,
+    to: IsoDate,
+    overwrite: boolean,
+    user: AuthUser,
+    employeeId?: string,
+  ) {
+    const result = await this.planner.generate(
+      resolveEmployeeId(user, employeeId),
+      from,
+      to,
+      overwrite,
+    );
     void this.audit.log({
       userId: user.id,
       entity: 'route',

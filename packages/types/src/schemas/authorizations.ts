@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { AUTHORIZATION_VALIDITIES } from '../enums';
-import { csvArray, nullableIsoDateSchema, optionalText } from './common';
+import { csvArray, isoDateSchema, nullableIsoDateSchema, optionalText } from './common';
+
+/** Datas da ação por loja: { [storeId]: ["2026-10-08", ...] } */
+export const letterStoreDatesSchema = z.record(z.string().uuid(), z.array(isoDateSchema).max(120));
+export type LetterStoreDates = z.infer<typeof letterStoreDatesSchema>;
+
+const storeIdsSchema = z.array(z.string().uuid()).max(500);
 
 export const letterMetaSchema = z
   .object({
@@ -9,6 +15,11 @@ export const letterMetaSchema = z
     validFrom: nullableIsoDateSchema,
     expirationDate: nullableIsoDateSchema,
     notes: optionalText(2000),
+    network: optionalText(120),
+    // multipart: "id1,id2"; obrigatório no envio geral (na página da loja ela já entra)
+    storeIds: csvArray(z.string().uuid()),
+    // multipart: JSON texto com as datas por loja (lidas da carta)
+    storeDates: z.string().max(200_000).optional(),
   })
   .refine((v) => !v.validFrom || !v.expirationDate || v.validFrom <= v.expirationDate, {
     message: 'O vencimento deve ser posterior ao início da vigência.',
@@ -22,6 +33,9 @@ export const letterUpdateSchema = z.object({
   validFrom: nullableIsoDateSchema,
   expirationDate: nullableIsoDateSchema,
   notes: optionalText(2000),
+  network: optionalText(120),
+  storeIds: storeIdsSchema.min(1, 'Selecione ao menos uma loja.').optional(),
+  storeDates: letterStoreDatesSchema.optional(),
 });
 export type LetterUpdateInput = z.infer<typeof letterUpdateSchema>;
 

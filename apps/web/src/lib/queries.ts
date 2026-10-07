@@ -27,6 +27,7 @@ import type {
   VisitSummaryDto,
 } from '@routeflow/types';
 import { api, type Query } from './api';
+import { useViewAs } from './view-as';
 
 export const keys = {
   dashboard: ['dashboard'] as const,
@@ -56,30 +57,44 @@ export const keys = {
   users: ['users'] as const,
 };
 
-export const useDashboard = () =>
-  useQuery({ queryKey: keys.dashboard, queryFn: () => api.get<DashboardDto>('/dashboard') });
+export const useDashboard = () => {
+  const { employeeId } = useViewAs();
+  return useQuery({
+    queryKey: [...keys.dashboard, employeeId ?? 'me'],
+    queryFn: () => api.get<DashboardDto>('/dashboard', employeeId ? { employeeId } : {}),
+  });
+};
 export const useManagerMetrics = (from: string, to: string) =>
   useQuery({
     queryKey: keys.manager(from, to),
     queryFn: () => api.get<ManagerMetricsDto>('/dashboard/manager', { from, to }),
   });
-export const useAgenda = (from: string, to: string) =>
-  useQuery({
-    queryKey: keys.agenda(from, to),
-    queryFn: () => api.get<AgendaResponse>('/agenda', { from, to }),
+export const useAgenda = (from: string, to: string) => {
+  const { employeeId } = useViewAs();
+  return useQuery({
+    queryKey: [...keys.agenda(from, to), employeeId ?? 'me'],
+    queryFn: () =>
+      api.get<AgendaResponse>('/agenda', { from, to, ...(employeeId ? { employeeId } : {}) }),
   });
-export const useRoutes = (from: string, to: string) =>
-  useQuery({
-    queryKey: keys.routes(from, to),
-    queryFn: () => api.get<RouteSummaryDto[]>('/routes', { from, to }),
+};
+export const useRoutes = (from: string, to: string) => {
+  const { employeeId } = useViewAs();
+  return useQuery({
+    queryKey: [...keys.routes(from, to), employeeId ?? 'me'],
+    queryFn: () =>
+      api.get<RouteSummaryDto[]>('/routes', { from, to, ...(employeeId ? { employeeId } : {}) }),
   });
+};
 export const useRoute = (id: string) =>
   useQuery({ queryKey: keys.route(id), queryFn: () => api.get<RouteDetailDto>(`/routes/${id}`) });
-export const useTemplates = () =>
-  useQuery({
-    queryKey: keys.templates,
-    queryFn: () => api.get<RouteTemplateDto[]>('/route-templates'),
+export const useTemplates = () => {
+  const { employeeId } = useViewAs();
+  return useQuery({
+    queryKey: [...keys.templates, employeeId ?? 'me'],
+    queryFn: () =>
+      api.get<RouteTemplateDto[]>('/route-templates', employeeId ? { employeeId } : {}),
   });
+};
 export const useVisits = (q: Query) =>
   useQuery({
     queryKey: keys.visits(q),
@@ -201,3 +216,20 @@ export function useInvalidateOperation() {
       ].map((k) => client.invalidateQueries({ queryKey: [k] })),
     );
 }
+
+/** Todas as lojas (paginando), para seleção em massa — ex.: lojas cobertas por uma carta. */
+export const useAllStores = (enabled = true) =>
+  useQuery({
+    queryKey: ['stores', 'all'],
+    enabled,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const items: StoreDto[] = [];
+      for (let page = 1; page <= 20; page++) {
+        const res = await api.get<Paginated<StoreDto>>('/stores', { page, pageSize: 100 });
+        items.push(...res.items);
+        if (page >= res.totalPages) break;
+      }
+      return items;
+    },
+  });

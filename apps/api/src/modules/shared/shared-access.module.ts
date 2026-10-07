@@ -1,4 +1,6 @@
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 import {
+  BadRequestException,
   Body,
   Controller,
   Get,
@@ -8,6 +10,7 @@ import {
   Module,
   NotFoundException,
   Param,
+  Patch,
   ParseUUIDPipe,
   Post,
   Query,
@@ -15,17 +18,18 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { z } from 'zod';
 import {
-  addDaysIso,
   endOfMonthIso,
   isoDateSchema,
   isoToUtcDate,
   paginationQuerySchema,
   sharedAccessCreateSchema,
+  sharedAccessUpdateSchema,
   SHARED_SCOPES,
   startOfMonthIso,
   todayIso,
   type PublicPanelDto,
   type SharedAccessCreateInput,
+  type SharedAccessUpdateInput,
   type SharedAccessCreatedDto,
   type SharedAccessDto,
   type SharedScope,
@@ -49,6 +53,30 @@ import { VisitsService } from '../visits/visits.service';
 
 type Row = Awaited<ReturnType<Db['sharedAccess']['findFirstOrThrow']>>;
 
+/** Cifra o token (AES-256-GCM) para permitir copiar o link novamente; a validação usa só o hash. */
+function linkKey(secret: string): Buffer {
+  return createHash('sha256').update(`${secret}:shared-links`).digest();
+}
+
+export function encryptToken(token: string, secret: string): string {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', linkKey(secret), iv);
+  const data = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return [iv, cipher.getAuthTag(), data].map((b) => b.toString('base64url')).join('.');
+}
+
+export function decryptToken(value: string | null, secret: string): string | null {
+  if (!value) return null;
+  try {
+    const [iv, tag, data] = value.split('.').map((p) => Buffer.from(p, 'base64url'));
+    const decipher = createDecipheriv('aes-256-gcm', linkKey(secret), iv!);
+    decipher.setAuthTag(tag!);
+    return Buffer.concat([decipher.update(data!), decipher.final()]).toString('utf8');
+  } catch {
+    return null;
+  }
+}
+
 /** Visualizador somente leitura usado internamente pelas rotas públicas. */
 const PUBLIC_VIEWER: AuthUser = {
   id: '00000000-0000-0000-0000-000000000000',
@@ -57,15 +85,17 @@ const PUBLIC_VIEWER: AuthUser = {
   role: 'MANAGER',
 };
 
-function toDto(row: Row): SharedAccessDto {
+function toDto(row: Row, url: string | null = null): SharedAccessDto {
   return {
     id: row.id,
     label: row.label,
     tokenPreview: row.tokenPreview,
+    url,
     scope: row.scope
       .split(',')
       .filter((s): s is SharedScope => (SHARED_SCOPES as readonly string[]).includes(s)),
-    expiresAt: row.expiresAt ? isoInstant(row.expiresAt) : null,
+    // Links públicos não expiram (campo mantido só por compatibilidade)
+    expiresAt: null,
     active: row.active && !row.revokedAt,
     revokedAt: row.revokedAt ? isoInstant(row.revokedAt) : null,
     lastAccessAt: row.lastAccessAt ? isoInstant(row.lastAccessAt) : null,
@@ -81,11 +111,18 @@ export class SharedAccessService {
     @Inject(APP_CONFIG) private readonly config: AppConfig,
   ) {}
 
-  async list(): Promise<SharedAccessDto[]> {
-    return (await this.db.sharedAccess.findMany({ orderBy: { createdAt: 'desc' } })).map(toDto);
+  private publicUrl(row: Row): string | null {
+    if (row.revokedAt) return null;
+    const token = decryptToken(row.tokenEncrypted, this.config.auth.jwtSecret);
+    return token ? `${this.config.appUrl}/public/dashboard/${token}` : null;
   }
 
-  /** O token (256 bits) é exibido UMA vez; o banco guarda apenas o hash SHA-256. */
+  async list(): Promise<SharedAccessDto[]> {
+    const rows = await this.db.sharedAccess.findMany({ orderBy: { createdAt: 'desc' } });
+    return rows.map((row) => toDto(row, this.publicUrl(row)));
+  }
+
+  /** Token de 256 bits; o banco guarda o hash (validação) e uma cópia cifrada (para copiar o link de novo). */
   async create(input: SharedAccessCreateInput, user: AuthUser): Promise<SharedAccessCreatedDto> {
     const token = randomToken(32);
     const row = await this.db.sharedAccess.create({
@@ -94,11 +131,33 @@ export class SharedAccessService {
         tokenHash: sha256(token),
         tokenPreview: token.slice(0, 6),
         scope: [...new Set(input.scope)].join(','),
-        expiresAt: input.expiresAt ? isoToUtcDate(addDaysIso(input.expiresAt, 1)) : null,
+        tokenEncrypted: encryptToken(token, this.config.auth.jwtSecret),
         createdById: user.id,
       },
     });
-    return { ...toDto(row), token, url: `${this.config.appUrl}/public/dashboard/${token}` };
+    const url = `${this.config.appUrl}/public/dashboard/${token}`;
+    return { ...toDto(row, url), token, url };
+  }
+
+  /** Desativa/reativa (reversível), renomeia ou ajusta o que o link exibe. Revogados não voltam. */
+  async update(id: string, input: SharedAccessUpdateInput): Promise<SharedAccessDto> {
+    const current = await this.db.sharedAccess.findUnique({ where: { id } });
+    if (!current) throw new NotFoundException('Link não encontrado.');
+    if (current.revokedAt && input.active) {
+      throw new BadRequestException(
+        'Este link foi revogado e não pode ser reativado. Crie um novo link.',
+      );
+    }
+    const row = await this.db.sharedAccess.update({
+      where: { id },
+      data: {
+        ...(input.label !== undefined ? { label: input.label } : {}),
+        ...(input.active !== undefined ? { active: input.active } : {}),
+        ...(input.scope ? { scope: [...new Set(input.scope)].join(',') } : {}),
+        expiresAt: null,
+      },
+    });
+    return toDto(row, this.publicUrl(row));
   }
 
   async revoke(id: string): Promise<SharedAccessDto> {
@@ -117,7 +176,7 @@ export class SharedAccessService {
     if (!/^[A-Za-z0-9_-]{20,100}$/.test(token))
       throw new NotFoundException('Link inválido ou expirado.');
     const row = await this.db.sharedAccess.findUnique({ where: { tokenHash: sha256(token) } });
-    if (!row || !row.active || row.revokedAt || (row.expiresAt && row.expiresAt < new Date())) {
+    if (!row || !row.active || row.revokedAt) {
       throw new NotFoundException('Link inválido ou expirado.');
     }
     const dto = toDto(row);
@@ -160,6 +219,28 @@ export class SharedAccessController {
       metadata: { label: body.label, scope: body.scope },
     });
     return created;
+  }
+
+  @Patch(':id')
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(new ZodPipe(sharedAccessUpdateSchema)) body: SharedAccessUpdateInput,
+    @CurrentUser() user: AuthUser,
+  ) {
+    const result = await this.shared.update(id, body);
+    void this.audit.log({
+      userId: user.id,
+      entity: 'shared_access',
+      entityId: id,
+      action:
+        body.active === false
+          ? 'shared_access.deactivate'
+          : body.active
+            ? 'shared_access.activate'
+            : 'shared_access.update',
+      metadata: body,
+    });
+    return result;
   }
 
   @Post(':id/revoke')

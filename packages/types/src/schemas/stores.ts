@@ -39,6 +39,8 @@ export const storeBaseSchema = z.object({
   latitude: latitudeSchema.nullable().optional(),
   longitude: longitudeSchema.nullable().optional(),
   observations: optionalText(5000),
+  // null = segue a regra da rede; true/false = exceção desta loja
+  authorizationRequired: z.boolean().nullable().optional(),
   active: z.boolean().default(true),
 });
 

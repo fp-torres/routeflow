@@ -24,7 +24,7 @@ O código é tipado com o client PostgreSQL; o client MySQL tem a mesma API em r
 - busca sem diferenciar maiúsculas: `mode: insensitive` no PostgreSQL, collation `utf8mb4_unicode_ci` no MySQL;
 - nenhum SQL específico de banco na aplicação.
 
-## Modelo (20 tabelas)
+## Modelo (21 tabelas)
 
 | Tabela                                     | Conteúdo                                                                                            |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------- |
@@ -53,6 +53,9 @@ Status de visita: `PENDING`, `IN_PROGRESS`, `COMPLETED`, `NOT_COMPLETED`, `RESCH
 Os campos `fileUrl`/`thumbnailUrl` guardam a **chave** do arquivo no StorageService; a API converte em URL assinada.
 
 ## Migrations
+
+- `20261007000000_init`: modelo inicial.
+- `20261008000000_multistore_letters_transit`: cartas com várias lojas (migra as cartas existentes), exigência de carta por loja, status de geocodificação, itinerários de transporte por trecho e token cifrado dos links públicos.
 
 - A migration inicial PostgreSQL foi gerada pelo motor oficial do Prisma.
 - A migration inicial MySQL segue as convenções de DDL do Prisma para MySQL e foi validada aplicando-a no MariaDB 10.11 e executando seed e os 16 testes de API. O CI confirma, com o motor oficial, que as migrations geram exatamente o schema (`prisma migrate diff --from-migrations ... --to-schema ... --exit-code`).

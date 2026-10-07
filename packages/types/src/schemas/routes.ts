@@ -15,6 +15,8 @@ export const routeQuerySchema = z.object({
 export type RouteQuery = z.infer<typeof routeQuerySchema>;
 
 export const routeCreateSchema = z.object({
+  // ADMIN/MANAGER: rota de outro funcionário
+  employeeId: z.string().uuid().optional(),
   date: isoDateSchema,
   storeIds: z.array(z.string().uuid()).max(40).default([]),
   fromTemplate: z.boolean().default(false),
@@ -46,7 +48,12 @@ export const routeOptimizeSchema = z.object({
 export type RouteOptimizeInput = z.infer<typeof routeOptimizeSchema>;
 
 export const routeGenerateSchema = z
-  .object({ from: isoDateSchema, to: isoDateSchema, overwrite: z.boolean().default(false) })
+  .object({
+    employeeId: z.string().uuid().optional(),
+    from: isoDateSchema,
+    to: isoDateSchema,
+    overwrite: z.boolean().default(false),
+  })
   .refine((v) => v.from <= v.to, { message: 'Período inválido.', path: ['to'] });
 export type RouteGenerateInput = z.infer<typeof routeGenerateSchema>;
 

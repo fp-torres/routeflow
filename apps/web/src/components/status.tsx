@@ -84,6 +84,14 @@ export function ValidityBadge({
 }
 
 export function StoreAuthBadge({ info }: { info: StoreAuthorizationInfo | null }) {
+  if (info && info.required === false) {
+    return (
+      <Badge tone="neutral">
+        <ShieldCheck />
+        Carta não exigida
+      </Badge>
+    );
+  }
   if (!info || !info.validity) {
     return (
       <Badge tone="warning">

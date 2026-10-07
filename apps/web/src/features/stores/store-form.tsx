@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { storeCreateSchema, type StoreCreateInput, type StoreDto } from '@routeflow/types';
-import { Button, Checkbox, DialogFooter, Field, Input, Textarea } from '@routeflow/ui';
+import { Button, Checkbox, DialogFooter, Field, Input, Textarea, Select } from '@routeflow/ui';
 import { fieldErrors } from '@/lib/forms';
 import { useCatalog } from '@/lib/queries';
 
@@ -18,7 +18,7 @@ type FormState = Record<
   | 'longitude'
   | 'observations',
   string
-> & { active: boolean };
+> & { active: boolean; authorizationRequired: 'network' | 'yes' | 'no' };
 
 function initial(store?: StoreDto): FormState {
   return {
@@ -35,6 +35,12 @@ function initial(store?: StoreDto): FormState {
     longitude: store?.longitude != null ? String(store.longitude) : '',
     observations: store?.observations ?? '',
     active: store?.active ?? true,
+    authorizationRequired:
+      store?.authorizationRequired === true
+        ? 'yes'
+        : store?.authorizationRequired === false
+          ? 'no'
+          : 'network',
   };
 }
 
@@ -57,11 +63,25 @@ export function StoreForm({
       setForm((f) => ({ ...f, [key]: e.target.value }));
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    const start = initial(store);
+    // coordenadas só vão quando alteradas: as automáticas (geocodificação) não viram "manuais"
+    const coordsChanged =
+      !store || form.latitude !== start.latitude || form.longitude !== start.longitude;
     const payload = {
       ...form,
       code: form.code || undefined,
-      latitude: form.latitude ? Number(form.latitude.replace(',', '.')) : null,
-      longitude: form.longitude ? Number(form.longitude.replace(',', '.')) : null,
+      authorizationRequired:
+        form.authorizationRequired === 'network' ? null : form.authorizationRequired === 'yes',
+      latitude: coordsChanged
+        ? form.latitude
+          ? Number(form.latitude.replace(',', '.'))
+          : null
+        : undefined,
+      longitude: coordsChanged
+        ? form.longitude
+          ? Number(form.longitude.replace(',', '.'))
+          : null
+        : undefined,
     };
     const parsed = storeCreateSchema.safeParse(payload);
     if (!parsed.success) {
@@ -136,6 +156,26 @@ export function StoreForm({
           value={form.observations}
           onChange={set('observations')}
         />
+      </Field>
+      <Field
+        label="Carta de autorização"
+        htmlFor="store-auth"
+        hint="Padrão: segue a regra da rede (Configurações › Operação)."
+      >
+        <Select
+          id="store-auth"
+          value={form.authorizationRequired}
+          onChange={(e) =>
+            setForm((f) => ({
+              ...f,
+              authorizationRequired: e.target.value as FormState['authorizationRequired'],
+            }))
+          }
+        >
+          <option value="network">Segue a regra da rede</option>
+          <option value="yes">Exige carta</option>
+          <option value="no">Não exige carta</option>
+        </Select>
       </Field>
       <Checkbox
         id="store-active"

@@ -209,6 +209,8 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
     expect(res.body.legLinks[0].url).toContain('travelmode=transit');
     expect(res.body.startAddress).toContain('Barão de Petrópolis, 572');
     expect(res.body.canOptimize).toBe(false);
+    expect(res.body.nextStop.transitUrl).toContain('travelmode=transit');
+    expect(res.body.nextStop.transitUrl).not.toContain('origin=');
     const preview = await http()
       .post(`/api/routes/${routeId}/optimize`)
       .set(auth())
@@ -249,10 +251,32 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .send({ apply: false })
       .expect(200);
     expect(preview.body.canOptimize).toBe(true);
-    expect(preview.body.proposedDistanceKm).toBeLessThanOrEqual(preview.body.currentDistanceKm);
+    expect(preview.body).toMatchObject({ method: 'exact', source: 'estimate', fixedStops: 0 });
+    expect(preview.body.proposedDurationSeconds).toBeLessThanOrEqual(
+      preview.body.currentDurationSeconds,
+    );
+    // Paradas já visitadas mantêm a posição; o restante é reorganizado a partir da última delas
+    const firstVisit = route.stops[0].visit.id;
+    await db.visit.update({ where: { id: firstVisit }, data: { status: 'COMPLETED' } });
+    const midDay = await http()
+      .post(`/api/routes/${routeId}/optimize`)
+      .set(auth())
+      .send({ apply: false })
+      .expect(200);
+    expect(midDay.body.fixedStops).toBe(1);
+    expect(midDay.body.proposedOrder[0]).toBe(route.stops[0].id);
+    await db.visit.update({ where: { id: firstVisit }, data: { status: 'PENDING' } });
+    const applied = await http()
+      .post(`/api/routes/${routeId}/optimize`)
+      .set(auth())
+      .send({ apply: true })
+      .expect(200);
+    expect(applied.body.applied).toBe(preview.body.improvementSeconds > 30);
     const detail = await http().post(`/api/routes/${routeId}/recalculate`).set(auth()).expect(200);
     expect(detail.body.estimatedDistance).toBeGreaterThan(0);
     expect(detail.body.legs[0].summary).toMatch(/estimativa/);
+    expect(detail.body.legs[0].steps.length).toBeGreaterThan(0);
+    expect(detail.body.legs[0].source).toBe('estimate');
   });
 
   let visitId = '';
@@ -266,7 +290,8 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .send({ latitude: -22.97, longitude: -43.18, accuracy: 25 })
       .expect(200);
     expect(started.body.visit.status).toBe('IN_PROGRESS');
-    expect(started.body.warning).toMatch(/autorização/);
+    // primeira visita do dia é de uma loja Cristal: carta não exigida, sem aviso
+    expect(started.body.warning).toBeNull();
     const original = await sharp({
       create: { width: 4032, height: 3024, channels: 3, background: '#c25b2c' },
     })
@@ -309,6 +334,54 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
     ).toEqual(expect.arrayContaining(['Visita iniciada', 'Visita concluída']));
   });
 
+  it('permite editar a visita depois de finalizada, mantendo o histórico', async () => {
+    const before = (await http().get(`/api/visits/${visitId}`).set(auth()).expect(200)).body;
+    const finishedAt = new Date(Date.parse(before.finishedAt) + 10 * 60_000).toISOString();
+    const edited = await http()
+      .patch(`/api/visits/${visitId}`)
+      .set(auth())
+      .send({ notes: 'Tudo certo — reposição concluída', finishedAt })
+      .expect(200);
+    expect(edited.body.notes).toBe('Tudo certo — reposição concluída');
+    expect(edited.body.finishedAt).toBe(finishedAt);
+    await http()
+      .patch(`/api/visits/${visitId}`)
+      .set(auth())
+      .send({ startedAt: finishedAt, finishedAt: before.startedAt })
+      .expect(400);
+    const photo = await sharp({
+      create: { width: 800, height: 600, channels: 3, background: '#2c7bc2' },
+    })
+      .jpeg()
+      .toBuffer();
+    await http()
+      .post(`/api/visits/${visitId}/photos`)
+      .set(auth())
+      .field('category', 'DISPLAY')
+      .attach('files', photo, { filename: 'gondola.jpg', contentType: 'image/jpeg' })
+      .expect(201);
+    const notDone = await http()
+      .patch(`/api/visits/${visitId}`)
+      .set(auth())
+      .send({ status: 'NOT_COMPLETED', statusReason: 'Teste de correção' })
+      .expect(200);
+    expect(notDone.body.status).toBe('NOT_COMPLETED');
+    const back = await http()
+      .patch(`/api/visits/${visitId}`)
+      .set(auth())
+      .send({ status: 'COMPLETED' })
+      .expect(200);
+    expect(back.body.status).toBe('COMPLETED');
+    expect(back.body.photos).toHaveLength(2);
+    expect(back.body.activities.map((a: { description: string }) => a.description)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(
+          /^Visita editada após a finalização: observações, horário de término/,
+        ),
+      ]),
+    );
+  });
+
   it('reagenda uma visita pendente para uma data futura', async () => {
     const visits = await http().get('/api/visits?date=2026-10-09').set(auth()).expect(200);
     const target = addDaysIso(todayIso(), 3);
@@ -338,6 +411,59 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
       .expect(201);
     letterId = created.body.id;
     expect(created.body).toMatchObject({ validity: 'CRITICAL', daysLeft: 5 });
+    expect(created.body.stores.map((s: { code: string }) => s.code)).toEqual(['V47']);
+    // Carta da rede cobrindo várias lojas, com as datas da ação de cada uma
+    const stores = (await http().get('/api/stores?pageSize=100').set(auth()).expect(200)).body
+      .items;
+    const byCode = (code: string) => stores.find((s: { code: string }) => s.code === code);
+    const v9 = byCode('V9');
+    const v72 = byCode('V72');
+    const multi = await http()
+      .post('/api/authorizations')
+      .set(auth())
+      .field('title', 'Autorização de Promotor — Out a Dez')
+      .field('validFrom', todayIso())
+      .field('expirationDate', addDaysIso(todayIso(), 60))
+      .field('storeIds', `${v9.id},${v72.id}`)
+      .field('storeDates', JSON.stringify({ [v9.id]: ['2026-12-08', '2026-10-08'] }))
+      .attach('file', await pdfBuffer('Carta da rede'), {
+        filename: 'carta-rede.pdf',
+        contentType: 'application/pdf',
+      })
+      .expect(201);
+    expect(multi.body.network).toBe('Drogaria Venancio');
+    expect(multi.body.stores).toHaveLength(2);
+    expect(multi.body.stores.find((s: { code: string }) => s.code === 'V9').dates).toEqual([
+      '2026-10-08',
+      '2026-12-08',
+    ]);
+    await http()
+      .post('/api/authorizations')
+      .set(auth())
+      .field('title', 'Sem lojas')
+      .attach('file', await pdfBuffer('x'), { filename: 'x.pdf', contentType: 'application/pdf' })
+      .expect(400);
+    const v9Info = (await http().get(`/api/stores/${v9.id}`).set(auth()).expect(200)).body
+      .authorization;
+    expect(v9Info).toMatchObject({ required: true, hasValid: true, validity: 'VALID' });
+    // Cristal não exige carta; a exceção por loja continua possível
+    const malibu = byCode('CRI-DROGARIA-MALIBU');
+    expect(malibu.authorization).toMatchObject({
+      required: false,
+      validity: 'NOT_REQUIRED',
+      hasValid: true,
+    });
+    const forced = await http()
+      .patch(`/api/stores/${malibu.id}`)
+      .set(auth())
+      .send({ authorizationRequired: true })
+      .expect(200);
+    expect(forced.body.authorization).toMatchObject({ required: true, hasValid: false });
+    await http()
+      .patch(`/api/stores/${malibu.id}`)
+      .set(auth())
+      .send({ authorizationRequired: null })
+      .expect(200);
     const pdf = await http().get(created.body.url).expect(200);
     expect(pdf.headers['content-type']).toBe('application/pdf');
     await http()
@@ -390,6 +516,7 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
     const dashboard = await http().get('/api/dashboard').set(auth()).expect(200);
     expect(dashboard.body.user.name).toBe('Felipe');
     expect(dashboard.body.authorizations.expiringIn7Days).toBe(1);
+    expect(dashboard.body.authorizations.notRequired).toBe(9);
     expect(dashboard.body.charts.visitsByDay).toHaveLength(14);
     const manager = await http()
       .get('/api/dashboard/manager?from=2026-10-01&to=2026-10-31')
@@ -441,8 +568,31 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
     expect(panel.body.recentVisits.length).toBeGreaterThan(0);
     await http().get(`/api/public/${created.body.token}/expenses`).expect(404);
     await http().post(`/api/public/${created.body.token}`).expect(404);
+    // Não expira: pode ser copiado de novo, desativado e reativado; revogado é definitivo
+    expect(created.body.expiresAt).toBeNull();
+    const listed = await http().get('/api/shared-access').set(auth()).expect(200);
+    expect(listed.body.find((l: { id: string }) => l.id === created.body.id).url).toBe(
+      created.body.url,
+    );
+    await http()
+      .patch(`/api/shared-access/${created.body.id}`)
+      .set(auth())
+      .send({ active: false })
+      .expect(200);
+    await http().get(`/api/public/${created.body.token}`).expect(404);
+    await http()
+      .patch(`/api/shared-access/${created.body.id}`)
+      .set(auth())
+      .send({ active: true })
+      .expect(200);
+    await http().get(`/api/public/${created.body.token}`).expect(200);
     await http().post(`/api/shared-access/${created.body.id}/revoke`).set(auth()).expect(200);
     await http().get(`/api/public/${created.body.token}`).expect(404);
+    await http()
+      .patch(`/api/shared-access/${created.body.id}`)
+      .set(auth())
+      .send({ active: true })
+      .expect(400);
   });
 
   it('reimporta a planilha pela API sem duplicar dados', async () => {
@@ -469,5 +619,88 @@ describeIfDb(`RouteFlow API — e2e (${provider})`, () => {
         'report.generate',
       ]),
     );
+  });
+
+  it('cria usuária funcionária com permissões restritas e transfere a operação', async () => {
+    const me = (await http().get('/api/users/me').set(auth()).expect(200)).body;
+    const created = await http()
+      .post('/api/users')
+      .set(auth())
+      .send({
+        name: 'Maria',
+        email: 'maria@routeflow.test',
+        password: 'Maria@123456',
+        role: 'EMPLOYEE',
+      })
+      .expect(201);
+    expect(created.body).toMatchObject({ name: 'Maria', role: 'EMPLOYEE', active: true });
+    await http()
+      .post('/api/users')
+      .set(auth())
+      .send({ name: 'Outra', email: 'maria@routeflow.test', password: 'Maria@123456' })
+      .expect(409);
+    const login = await http()
+      .post('/api/auth/login')
+      .send({ email: 'maria@routeflow.test', password: 'Maria@123456' })
+      .expect(200);
+    const maria = { Authorization: `Bearer ${login.body.accessToken}` };
+    await http().get('/api/users').set(maria).expect(403);
+    await http()
+      .post('/api/users')
+      .set(maria)
+      .send({ name: 'X', email: 'x@routeflow.test', password: 'Senha@123456' })
+      .expect(403);
+    await http().patch('/api/settings').set(maria).send({ companyName: 'Outra' }).expect(403);
+    await http()
+      .post('/api/shared-access')
+      .set(maria)
+      .send({ label: 'Teste', scope: ['visits'] })
+      .expect(403);
+    // funcionária vê só os próprios dados (pedir os de outro usuário é ignorado)
+    const own = await http().get(`/api/dashboard?employeeId=${me.id}`).set(maria).expect(200);
+    expect(own.body.user.name).toBe('Maria');
+    expect(
+      (await http().get('/api/routes?from=2026-10-07&to=2026-10-13').set(maria).expect(200)).body,
+    ).toHaveLength(0);
+    // administrador transfere a programação importada para a Maria
+    const transfer = await http()
+      .post(`/api/users/${created.body.id}/transfer-operation`)
+      .set(auth())
+      .send({ fromUserId: me.id, includePast: true })
+      .expect(201);
+    expect(transfer.body.routes).toBeGreaterThanOrEqual(5);
+    expect(transfer.body.templates).toBe(1);
+    expect(transfer.body.homeAddressCopied).toBe(true);
+    const routes = await http()
+      .get('/api/routes?from=2026-10-07&to=2026-10-13')
+      .set(maria)
+      .expect(200);
+    expect(routes.body.length).toBeGreaterThanOrEqual(5);
+    // administrador acompanha o dia da Maria ("visualizando como")
+    const viewAs = await http()
+      .get(`/api/dashboard?employeeId=${created.body.id}`)
+      .set(auth())
+      .expect(200);
+    expect(viewAs.body.user.name).toBe('Maria');
+    // proteções e gestão de acesso
+    await http().patch(`/api/users/${me.id}`).set(auth()).send({ role: 'EMPLOYEE' }).expect(400);
+    await http()
+      .post(`/api/users/${created.body.id}/password`)
+      .set(auth())
+      .send({ password: 'NovaSenha@2026' })
+      .expect(204);
+    await http()
+      .post('/api/auth/login')
+      .send({ email: 'maria@routeflow.test', password: 'Maria@123456' })
+      .expect(401);
+    await http()
+      .patch(`/api/users/${created.body.id}`)
+      .set(auth())
+      .send({ active: false })
+      .expect(200);
+    await http()
+      .post('/api/auth/login')
+      .send({ email: 'maria@routeflow.test', password: 'NovaSenha@2026' })
+      .expect(401);
   });
 });

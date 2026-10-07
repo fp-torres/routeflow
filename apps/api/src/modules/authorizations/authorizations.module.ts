@@ -25,7 +25,7 @@ import {
   type LetterUpdateInput,
 } from '@routeflow/types';
 import { loadConfig } from '../../config/env';
-import { CurrentUser } from '../../common/decorators';
+import { CurrentUser, Roles } from '../../common/decorators';
 import type { AuthUser } from '../../common/auth-user';
 import { ZodPipe } from '../../common/zod.pipe';
 import type { UploadedFile as UploadedFileType } from '../../common/uploads';
@@ -51,6 +51,17 @@ export class AuthorizationsController {
     return this.letters.list({ storeId });
   }
 
+  /** Carta cobrindo várias lojas (ex.: carta trimestral da rede). */
+  @Post('authorizations')
+  @UseInterceptors(pdfUpload())
+  createMany(
+    @Body(new ZodPipe(letterMetaSchema)) body: LetterMetaInput,
+    @UploadedFile() file: UploadedFileType | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.letters.create(body, file, user);
+  }
+
   @Post('stores/:storeId/authorizations')
   @UseInterceptors(pdfUpload())
   create(
@@ -59,7 +70,7 @@ export class AuthorizationsController {
     @UploadedFile() file: UploadedFileType | undefined,
     @CurrentUser() user: AuthUser,
   ) {
-    return this.letters.create(storeId, body, file, user);
+    return this.letters.create(body, file, user, storeId);
   }
 
   @Get('authorizations/:id')
@@ -87,6 +98,7 @@ export class AuthorizationsController {
   }
 
   @Delete('authorizations/:id')
+  @Roles('MANAGER')
   @HttpCode(204)
   async remove(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() user: AuthUser) {
     await this.letters.remove(id, user);

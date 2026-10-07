@@ -120,7 +120,7 @@ export class NotificationsService implements OnApplicationBootstrap {
         status: 'ACTIVE',
         expirationDate: { lte: isoToUtcDate(addDaysIso(today, thresholds.warningDays)) },
       },
-      include: { store: { select: { id: true, code: true, name: true } } },
+      include: { stores: { include: { store: { select: { id: true, code: true, name: true } } } } },
     });
     for (const letter of letters) {
       const expirationDate = isoDateOrNull(letter.expirationDate);
@@ -131,18 +131,23 @@ export class NotificationsService implements OnApplicationBootstrap {
       );
       if (validity !== 'EXPIRED' && validity !== 'CRITICAL' && validity !== 'EXPIRING') continue;
       if (validity === 'EXPIRED' && daysLeft != null && daysLeft < -30) continue;
+      const covered = letter.stores.map((s) => s.store);
+      const single = covered.length === 1 ? covered[0]! : null;
+      const scope = single ? single.code : `${letter.network ?? 'carta'} (${covered.length} lojas)`;
+      const names =
+        covered
+          .slice(0, 4)
+          .map((s) => s.code)
+          .join(', ') + (covered.length > 4 ? ` e mais ${covered.length - 4}` : '');
       const type: NotificationType =
         validity === 'EXPIRED' ? 'AUTHORIZATION_EXPIRED' : 'AUTHORIZATION_EXPIRING';
       for (const user of users) {
         items.push({
           userId: user.id,
           type,
-          title:
-            validity === 'EXPIRED'
-              ? `Autorização vencida — ${letter.store.code}`
-              : `Autorização vencendo — ${letter.store.code}`,
-          message: `${letter.store.name}: "${letter.title}". ${describeDaysLeft(daysLeft)}.`,
-          link: `/lojas/${letter.store.id}/autorizacoes`,
+          title: `${validity === 'EXPIRED' ? 'Autorização vencida' : 'Autorização vencendo'} — ${scope}`,
+          message: `"${letter.title}" (${names}). ${describeDaysLeft(daysLeft)}.`,
+          link: single ? `/lojas/${single.id}/autorizacoes` : '/autorizacoes',
           dedupeKey: `auth:${validity}:${letter.id}:${expirationDate}:${user.id}`,
         });
       }

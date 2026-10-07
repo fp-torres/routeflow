@@ -48,6 +48,8 @@ export default defineConfig(({ mode }) => {
           navigateFallback: '/index.html',
           navigateFallbackDenylist: [/^\/api\//, /^\/health/],
           cleanupOutdatedCaches: true,
+          // pdf.js só é usado ao enviar cartas: fica fora do cache inicial (economia de dados móveis)
+          globIgnores: ['**/pdf-*.js', '**/pdf.worker*'],
           maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         },
       }),

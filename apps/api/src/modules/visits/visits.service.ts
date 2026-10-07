@@ -314,15 +314,28 @@ export class VisitsService {
     return { visit: await this.detail(id, user), warning: null };
   }
 
+  /**
+   * Edição da visita — inclusive depois de finalizada (esqueceu algo? corrige aqui):
+   * observações, resultado (concluída ⇄ não realizada), motivo e horários de início/fim.
+   * Fotos, atividades e despesas continuam podendo ser adicionadas. Tudo fica no histórico.
+   */
   async update(id: string, input: VisitUpdateInput, user: AuthUser): Promise<VisitDetailDto> {
     const visit = await this.findAccessible(id, user);
     const data: Prisma.VisitUpdateInput = {};
-    if (input.notes !== undefined) data.notes = input.notes;
+    const changes: string[] = [];
+    const closed = visit.status === 'COMPLETED' || visit.status === 'NOT_COMPLETED';
+    if (input.notes !== undefined && (input.notes ?? null) !== (visit.notes ?? null)) {
+      data.notes = input.notes;
+      changes.push('observações');
+    }
     if (input.status && input.status !== visit.status) {
       const allowed: Record<string, string[]> = {
         PENDING: ['IN_PROGRESS', 'BLOCKED', 'CANCELLED', 'NOT_COMPLETED'],
         CANCELLED: ['PENDING', 'BLOCKED'],
         BLOCKED: ['PENDING'],
+        // correção do resultado de uma visita já finalizada
+        COMPLETED: ['NOT_COMPLETED'],
+        NOT_COMPLETED: ['COMPLETED'],
       };
       if (!allowed[input.status]?.includes(visit.status)) {
         throw new ConflictException(
@@ -330,30 +343,78 @@ export class VisitsService {
         );
       }
       data.status = input.status;
-      data.statusReason = input.statusReason ?? null;
+      data.statusReason =
+        input.status === 'COMPLETED' ? null : (input.statusReason ?? visit.statusReason ?? null);
       if (input.status === 'PENDING') {
         data.startedAt = null;
         data.finishedAt = null;
       }
+      changes.push(
+        `resultado: ${VISIT_STATUS_LABEL[visit.status]} → ${VISIT_STATUS_LABEL[input.status]}`,
+      );
+    } else if (
+      input.statusReason !== undefined &&
+      (input.statusReason ?? null) !== (visit.statusReason ?? null)
+    ) {
+      data.statusReason = input.statusReason;
+      changes.push('motivo');
     }
+    let startedAt = visit.startedAt;
+    let finishedAt = visit.finishedAt;
+    if (input.startedAt !== undefined) {
+      if (!closed && visit.status !== 'IN_PROGRESS') {
+        throw new ConflictException(
+          'O horário de início só pode ser ajustado em visitas iniciadas ou finalizadas.',
+        );
+      }
+      const value = input.startedAt ? new Date(input.startedAt) : null;
+      if ((value?.getTime() ?? null) !== (visit.startedAt?.getTime() ?? null)) {
+        startedAt = value;
+        data.startedAt = value;
+        changes.push('horário de início');
+      }
+    }
+    if (input.finishedAt !== undefined) {
+      if (!closed)
+        throw new ConflictException(
+          'O horário de término só pode ser ajustado em visitas finalizadas.',
+        );
+      const value = input.finishedAt ? new Date(input.finishedAt) : null;
+      if ((value?.getTime() ?? null) !== (visit.finishedAt?.getTime() ?? null)) {
+        finishedAt = value;
+        data.finishedAt = value;
+        changes.push('horário de término');
+      }
+    }
+    if (startedAt && finishedAt && startedAt > finishedAt) {
+      throw new BadRequestException('O término precisa ser depois do início.');
+    }
+    if (changes.length === 0) return this.detail(id, user);
     await this.db.visit.update({ where: { id }, data });
-    if (data.status) {
-      await this.db.visitActivity.create({
-        data: {
-          visitId: id,
-          userId: user.id,
-          type: 'STATUS_CHANGE',
-          description: `Status alterado para ${VISIT_STATUS_LABEL[input.status!]}`,
-        },
-      });
-      if (visit.routeId) await this.routes.syncStatus(visit.routeId);
-    }
+    await this.db.visitActivity.create({
+      data: {
+        visitId: id,
+        userId: user.id,
+        type: data.status ? 'STATUS_CHANGE' : 'SYSTEM',
+        description: `Visita editada${closed ? ' após a finalização' : ''}: ${changes.join(', ')}`,
+      },
+    });
+    if (data.status && visit.routeId) await this.routes.syncStatus(visit.routeId);
     void this.audit.log({
       userId: user.id,
       entity: 'visit',
       entityId: id,
       action: 'visit.update',
-      metadata: input,
+      metadata: {
+        changes,
+        before: {
+          status: visit.status,
+          notes: visit.notes,
+          startedAt: visit.startedAt,
+          finishedAt: visit.finishedAt,
+        },
+        after: input,
+      },
     });
     return this.detail(id, user);
   }

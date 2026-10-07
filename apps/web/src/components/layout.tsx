@@ -33,6 +33,7 @@ import {
   DropdownMenuTrigger,
 } from '@routeflow/ui';
 import { useAuth } from '@/lib/auth';
+import { ViewAsBanner, ViewAsSelect } from './view-as';
 import { useUnreadCount } from '@/lib/queries';
 import { useTheme, type ThemePreference } from '@/lib/theme';
 import { BrandMark, Wordmark } from './brand';
@@ -223,10 +224,12 @@ export function AppShell() {
               <span className="font-bold tracking-tight">RouteFlow</span>
             </Link>
             <div className="flex-1" />
+            <ViewAsSelect />
             <NotificationBell />
             <UserMenu />
           </div>
         </header>
+        <ViewAsBanner />
         <main
           id="conteudo"
           className="mx-auto w-full max-w-6xl min-w-0 flex-1 px-4 pt-4 pb-28 sm:px-6 sm:pt-6 lg:pb-12"

@@ -1,7 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import {
   addDaysIso,
-  computeLetterValidity,
   eachDayIso,
   endOfMonthIso,
   endOfWeekIso,
@@ -10,7 +9,6 @@ import {
   isoToUtcDate,
   startOfMonthIso,
   startOfWeekIso,
-  summarizeStoreAuthorization,
   todayIso,
   TRANSPORT_TYPES,
   VISIT_STATUS_LABEL,
@@ -29,9 +27,9 @@ import {
 import { APP_CONFIG, type AppConfig } from '../../config/env';
 import { DB } from '../../database/database.module';
 import type { Db } from '../../database/prisma.types';
-import type { AuthUser } from '../../common/auth-user';
+import { resolveEmployeeId, type AuthUser } from '../../common/auth-user';
 import { NO_AUTHORIZATION } from '../../common/mappers';
-import { isoDate, isoDateOrNull, isoInstant, money } from '../../common/serialize';
+import { isoDate, isoInstant, money } from '../../common/serialize';
 import { toVisitSummary, visitSummaryInclude } from '../../common/visit-mappers';
 import { AuthorizationsService } from '../authorizations/authorizations.service';
 import { ExpensesService } from '../expenses/expenses.service';
@@ -51,66 +49,53 @@ export class DashboardService {
     private readonly fares: FaresService,
   ) {}
 
-  /** Situação das autorizações de todas as lojas ativas. */
+  /** Situação das autorizações das lojas ativas (lojas que não exigem carta contam à parte). */
   async authorizationOverview(): Promise<
     AuthorizationCounters & { expiringSoon: ExpiringLetterItem[]; expiringIn7Days: number }
   > {
-    const today = todayIso(this.config.timeZone);
-    const thresholds = await this.settings.thresholds();
-    const stores = await this.db.store.findMany({
-      where: { active: true },
-      select: {
-        id: true,
-        code: true,
-        name: true,
-        authorizationLetters: {
-          where: { deletedAt: null },
-          select: { id: true, status: true, validFrom: true, expirationDate: true },
-        },
-      },
-    });
+    const stores = await this.db.store.findMany({ where: { active: true }, select: { id: true } });
+    const [summaries, letters] = await Promise.all([
+      this.letters.summaries(stores.map((s) => s.id)),
+      this.letters.list({}),
+    ]);
     const counters: AuthorizationCounters = {
       valid: 0,
       expiring: 0,
       critical: 0,
       expired: 0,
       withoutLetter: 0,
+      notRequired: 0,
     };
-    const items: ExpiringLetterItem[] = [];
     for (const store of stores) {
-      const letters = store.authorizationLetters.map((l) => ({
-        id: l.id,
-        status: l.status,
-        validFrom: isoDateOrNull(l.validFrom),
-        expirationDate: isoDateOrNull(l.expirationDate),
-      }));
-      const summary = summarizeStoreAuthorization(letters, today, thresholds);
-      if (!summary) counters.withoutLetter += 1;
-      else if (summary.validity === 'VALID' || summary.validity === 'NO_EXPIRATION')
-        counters.valid += 1;
-      else if (summary.validity === 'EXPIRING') counters.expiring += 1;
-      else if (summary.validity === 'CRITICAL') counters.critical += 1;
+      const s = summaries.get(store.id);
+      if (!s || !s.required) counters.notRequired += 1;
+      else if (!s.validity) counters.withoutLetter += 1;
+      else if (s.validity === 'VALID' || s.validity === 'NO_EXPIRATION') counters.valid += 1;
+      else if (s.validity === 'EXPIRING') counters.expiring += 1;
+      else if (s.validity === 'CRITICAL') counters.critical += 1;
       else counters.expired += 1;
-      for (const letter of letters) {
-        const { validity, daysLeft } = computeLetterValidity(letter, today, thresholds);
-        if (
-          validity === 'CRITICAL' ||
-          validity === 'EXPIRING' ||
-          (validity === 'EXPIRED' && (daysLeft ?? 0) >= -30)
-        ) {
-          items.push({
-            letterId: letter.id,
-            storeId: store.id,
-            storeName: store.name,
-            storeCode: store.code,
-            expirationDate: letter.expirationDate,
-            daysLeft,
-            validity,
-          });
-        }
-      }
     }
-    items.sort((a, b) => (a.daysLeft ?? 0) - (b.daysLeft ?? 0));
+    const items: ExpiringLetterItem[] = [];
+    for (const letter of letters) {
+      const relevant =
+        letter.validity === 'CRITICAL' ||
+        letter.validity === 'EXPIRING' ||
+        (letter.validity === 'EXPIRED' && (letter.daysLeft ?? 0) >= -30);
+      if (!relevant) continue;
+      const covered = letter.stores.filter((s) => summaries.get(s.id)?.required);
+      const first = covered[0];
+      if (!first) continue;
+      items.push({
+        letterId: letter.id,
+        storeId: first.id,
+        storeName: covered.length > 1 ? `${letter.title} (${covered.length} lojas)` : first.name,
+        storeCode: covered.length > 1 ? (letter.network ?? first.code) : first.code,
+        expirationDate: letter.expirationDate,
+        daysLeft: letter.daysLeft,
+        validity: letter.validity,
+      });
+    }
+    items.sort((x, y) => (x.daysLeft ?? 0) - (y.daysLeft ?? 0));
     return {
       ...counters,
       expiringSoon: items.slice(0, 12),
@@ -118,8 +103,15 @@ export class DashboardService {
     };
   }
 
-  async employee(user: AuthUser): Promise<DashboardDto> {
-    const employeeId = user.id;
+  async employee(user: AuthUser, requested?: string | null): Promise<DashboardDto> {
+    const employeeId = resolveEmployeeId(user, requested);
+    const viewed =
+      employeeId === user.id
+        ? { id: user.id, name: user.name }
+        : await this.db.user.findUniqueOrThrow({
+            where: { id: employeeId },
+            select: { id: true, name: true },
+          });
     const today = todayIso(this.config.timeZone);
     await this.planner.ensureUpcoming(employeeId);
     const monthFrom = startOfMonthIso(today);
@@ -261,7 +253,7 @@ export class DashboardService {
     });
 
     return {
-      user: { id: user.id, name: user.name },
+      user: viewed,
       today,
       holiday,
       todayRoute: route
@@ -492,6 +484,7 @@ export class DashboardService {
         critical: auth.critical,
         expired: auth.expired,
         withoutLetter: auth.withoutLetter,
+        notRequired: auth.notRequired,
         expiringSoon: auth.expiringSoon,
       },
     };

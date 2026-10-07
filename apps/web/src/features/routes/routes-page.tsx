@@ -41,6 +41,7 @@ import { RouteStatusBadge } from '@/components/status';
 import { StorePicker } from '@/components/store-picker';
 import { api } from '@/lib/api';
 import { keys, useRoutes, useTemplates } from '@/lib/queries';
+import { useViewAs } from '@/lib/view-as';
 import { SortableList } from './sortable';
 
 function WeekRoutes() {
@@ -51,10 +52,12 @@ function WeekRoutes() {
   const [newDate, setNewDate] = React.useState<string | null>(null);
   const from = startOfWeekIso(anchor);
   const to = endOfWeekIso(anchor);
+  const viewAs = useViewAs();
   const routes = useRoutes(from, to);
   const generate = useMutation({
     mutationFn: () =>
       api.post<{ created: string[]; replaced: string[]; skipped: string[] }>('/routes/generate', {
+        employeeId: viewAs.employeeId ?? undefined,
         from,
         to,
       }),
@@ -71,7 +74,12 @@ function WeekRoutes() {
   });
   const create = useMutation({
     mutationFn: (date: string) =>
-      api.post<RouteDetailDto>('/routes', { date, fromTemplate: true, storeIds: [] }),
+      api.post<RouteDetailDto>('/routes', {
+        date,
+        fromTemplate: true,
+        storeIds: [],
+        employeeId: viewAs.employeeId ?? undefined,
+      }),
     onSuccess: (r) => navigate(`/rotas/${r.id}`),
     onError: toastError,
   });

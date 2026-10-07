@@ -17,6 +17,7 @@ import type {
   UserRole,
   VisitActivityType,
   VisitStatus,
+  TransitStepMode,
 } from './enums';
 import type { IsoDate } from './domain/dates';
 import type { Holiday } from './domain/holidays';
@@ -57,6 +58,8 @@ export interface AuthResponse {
 }
 
 export interface StoreAuthorizationInfo {
+  /** A loja exige carta (regra da rede ou da loja)? */
+  required: boolean;
   validity: AuthorizationValidity | null;
   daysLeft: number | null;
   hasValid: boolean;
@@ -84,6 +87,9 @@ export interface StoreDto extends StoreRef {
   observations: string | null;
   active: boolean;
   geocodeSource: string | null;
+  geocodeStatus: string | null;
+  /** null = segue a regra da rede */
+  authorizationRequired: boolean | null;
   createdAt: string;
   updatedAt: string;
   authorization: StoreAuthorizationInfo | null;
@@ -156,16 +162,20 @@ export interface VisitActionResult {
   warning: string | null;
 }
 
+export interface LetterStoreDto {
+  id: string;
+  code: string;
+  name: string;
+  network: string;
+  neighborhood: string | null;
+  /** Datas da ação para a loja (lidas da carta); vazio = todo o período de vigência */
+  dates: IsoDate[];
+}
+
 export interface AuthorizationLetterDto {
   id: string;
-  storeId: string;
-  store: {
-    id: string;
-    code: string;
-    name: string;
-    network: string;
-    neighborhood: string | null;
-  } | null;
+  network: string | null;
+  stores: LetterStoreDto[];
   title: string;
   fileName: string;
   mimeType: string;
@@ -231,6 +241,18 @@ export interface RouteSummaryDto {
   holiday: Holiday | null;
 }
 
+export interface TransitStepDto {
+  mode: TransitStepMode;
+  /** Linha (ex.: 422, Linha 1, BRT TransOeste) */
+  line: string | null;
+  headsign: string | null;
+  from: string | null;
+  to: string | null;
+  durationSeconds: number | null;
+  distanceMeters: number | null;
+  stopCount: number | null;
+}
+
 export interface RouteLegDto {
   index: number;
   fromLabel: string;
@@ -240,6 +262,9 @@ export interface RouteLegDto {
   durationSeconds: number | null;
   cost: number | null;
   summary: string | null;
+  /** Etapas do itinerário (caminhada, ônibus, metrô, trem...), quando calculado por um provedor de transporte */
+  steps: TransitStepDto[] | null;
+  source: 'google' | 'estimate' | null;
   transitUrl: string;
 }
 
@@ -257,6 +282,9 @@ export interface RouteDetailDto extends RouteSummaryDto {
   canOptimize: boolean;
   optimizeHint: string | null;
   fullRouteTravelMode: 'driving' | 'walking';
+  optimizedAt: string | null;
+  /** Próxima loja pendente: abre o transporte público a partir da localização atual */
+  nextStop: { stopId: string; visitId: string; storeName: string; transitUrl: string } | null;
 }
 
 export interface OptimizationPreviewDto {
@@ -268,6 +296,13 @@ export interface OptimizationPreviewDto {
   currentDistanceKm: number | null;
   proposedDistanceKm: number | null;
   improvementKm: number | null;
+  currentDurationSeconds: number | null;
+  proposedDurationSeconds: number | null;
+  improvementSeconds: number | null;
+  /** Paradas já iniciadas/finalizadas que mantêm a posição */
+  fixedStops: number;
+  method: 'exact' | 'heuristic' | null;
+  source: 'google' | 'estimate' | null;
   missingCoordinates: string[];
 }
 
@@ -382,6 +417,7 @@ export interface AuthorizationCounters {
   critical: number;
   expired: number;
   withoutLetter: number;
+  notRequired: number;
 }
 
 export interface ExpiringLetterItem {
@@ -509,6 +545,8 @@ export interface SharedAccessDto {
   id: string;
   label: string;
   tokenPreview: string;
+  /** Link completo (disponível para links criados a partir desta versão) */
+  url: string | null;
   scope: SharedScope[];
   expiresAt: string | null;
   active: boolean;

@@ -22,6 +22,8 @@ export const companySettingsSchema = z.object({
   authorizationWarningDays: z.coerce.number().int().min(1).max(365),
   authorizationCriticalDays: z.coerce.number().int().min(0).max(60),
   blockVisitWithoutAuthorization: z.boolean(),
+  // Redes cuja loja precisa de carta de autorização (as demais aparecem como "Não exigida")
+  authorizationRequiredNetworks: z.array(z.string().trim().min(1).max(120)).max(50),
   autoGenerateRoutes: z.boolean(),
   routeGenerationHorizonDays: z.coerce.number().int().min(0).max(120),
   fullRouteTravelMode: z.enum(['driving', 'walking']),
@@ -44,10 +46,17 @@ export type CompanySettingsUpdate = z.infer<typeof companySettingsUpdateSchema>;
 
 export const sharedAccessCreateSchema = z.object({
   label: z.string().trim().min(2, 'Dê um nome ao link (ex.: Gestor comercial).').max(120),
-  expiresAt: optionalIsoDateSchema,
   scope: z.array(z.enum(SHARED_SCOPES)).min(1, 'Selecione o que o link pode exibir.'),
 });
 export type SharedAccessCreateInput = z.infer<typeof sharedAccessCreateSchema>;
+
+/** Links públicos não expiram: só são desativados/reativados ou revogados manualmente. */
+export const sharedAccessUpdateSchema = z.object({
+  label: z.string().trim().min(2).max(120).optional(),
+  active: z.boolean().optional(),
+  scope: z.array(z.enum(SHARED_SCOPES)).min(1).optional(),
+});
+export type SharedAccessUpdateInput = z.infer<typeof sharedAccessUpdateSchema>;
 
 export const reportQuerySchema = z.object({
   from: optionalIsoDateSchema,

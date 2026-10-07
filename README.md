@@ -11,29 +11,33 @@ RouteFlow centraliza a operação de um promotor que visita lojas (inicialmente 
 
 ## O que foi validado
 
-| Verificação                                                                | Resultado                                                                                       |
-| -------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Importação da planilha real (`data/Controle_Profissional_de_Visitas.xlsx`) | 43 lojas, 43 visitas, 5 rotas, roteiro semanal e endereço de casa — em **PostgreSQL e MariaDB** |
-| Idempotência (reimportar)                                                  | 2ª execução: 0 criados / 0 atualizados nos dois bancos                                          |
-| Testes de API ponta a ponta (16 cenários)                                  | 16/16 no PostgreSQL 16 e 16/16 no MariaDB 10.11                                                 |
-| Testes unitários                                                           | API 4/4, tipos/domínio 12/12, design system 5/5, web 2/2                                        |
-| Lint (ESLint) e tipos (TypeScript strict)                                  | sem erros                                                                                       |
-| Responsividade (Chromium)                                                  | 16 telas × 10 larguras (320–1920 px): 0 rolagens horizontais, 0 erros de console                |
-| Pacote de produção                                                         | `npm install --omit=dev` + `NODE_ENV=production` + MariaDB: API, SPA e PDF funcionando          |
+| Verificação                                                                | Resultado                                                                                                                                    |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Importação da planilha real (`data/Controle_Profissional_de_Visitas.xlsx`) | 43 lojas, 43 visitas, 5 rotas, roteiro semanal e endereço de casa — em **PostgreSQL e MariaDB**                                              |
+| Idempotência (reimportar)                                                  | 2ª execução: 0 criados / 0 atualizados nos dois bancos                                                                                       |
+| Testes de API ponta a ponta (18 cenários)                                  | 18/18 no PostgreSQL 16 e 18/18 no MariaDB 10.11 (inclui cartas multi-loja, edição após finalizar, usuários/permissões e links sem expiração) |
+| Testes unitários                                                           | API 7/7, tipos/domínio 19/19 (leitura da carta, otimizador exato), design system 5/5, web 2/2                                                |
+| Lint (ESLint) e tipos (TypeScript strict)                                  | sem erros                                                                                                                                    |
+| Responsividade (Chromium)                                                  | 16 telas × 10 larguras (320–1920 px): 0 rolagens horizontais, 0 erros de console                                                             |
+| Carta real da Drogaria Venancio (PDF)                                      | 41 filiais e datas lidas no navegador; 29/34 lojas da operação cobertas; V95, V120, V134, V34 e V108 apontadas como fora da carta            |
+| Pacote de produção                                                         | `npm install --omit=dev` + `NODE_ENV=production` + MariaDB: API, SPA e PDF funcionando                                                       |
 
 ## Funcionalidades
 
 - **Dashboard do funcionário** — saudação, rota de hoje (linha Casa → lojas → Casa), próxima visita, progresso, gastos do dia/mês, distância, alertas (autorizações vencendo, lojas sem carta, feriados), gráficos e linha do tempo.
 - **Visão gerencial** — programadas, concluídas, pendentes, não realizadas, reagendadas, taxa de conclusão, visitas por rede/região/dia, despesas, distância e situação das autorizações.
 - **Agenda** — Hoje, Semana, Mês e Personalizado; visitas previstas pelo roteiro aparecem antes de existirem.
-- **Rotas** — roteiro padrão (semanal), roteiro semanal em ciclo (ex.: semanas A/B), roteiro mensal (semana do mês) e alterações por data; arrastar para reordenar; adicionar/remover lojas; **otimização opcional** (vizinho mais próximo + 2-opt); trechos com modo, tempo e custo; links do Google Maps (rota completa dividida em até 9 paradas por link e um link de transporte público por trecho).
-- **Visitas no celular** — endereço + Google Maps, carta de autorização, iniciar (com localização aproximada opcional, sem rastreamento contínuo), fotos (câmera/galeria, várias, pré-visualização, progresso), observações, atividades, gastos, finalizar, não realizada, reagendar.
+- **Rotas em transporte público** — roteiro padrão (semanal), semanal em ciclo, mensal e alterações por data; arrastar para reordenar; cada trecho Casa → lojas → Casa com itinerário (a pé, ônibus, metrô, trem, VLT), tempo e custo; botão **“Ir para a próxima loja”** (Google Maps em transporte público a partir da localização atual); **otimização opcional e exata** pela soma dos tempos de transporte público (Held-Karp até 13 paradas), mantendo no lugar as visitas já feitas. Com a chave do Google Routes, linhas, estações e tempos reais aparecem no app.
+- **Visitas no celular** — endereço + “Como chegar (transporte público)”, carta de autorização, iniciar (com localização aproximada opcional, sem rastreamento contínuo), fotos (câmera/galeria, várias, pré-visualização, progresso), observações, atividades, gastos, finalizar, não realizada, reagendar.
 - **Fotos** — validação do tipo real (magic bytes) e tamanho, compressão no navegador e no servidor (WebP), miniatura, remoção de metadados EXIF (inclui GPS), tamanhos original/otimizado registrados.
-- **Cartas de autorização** — várias por loja; enviar, abrir, baixar, substituir (versão anterior preservada), editar, excluir (lógica) e histórico. Vencimento: verde (> 30 dias), amarelo (30–8), vermelho (7–0) e vermelho crítico (expirada). Por padrão **não bloqueia** visitas (configurável).
+- **Cartas de autorização** — **uma carta vale para várias lojas** (ex.: carta trimestral da Drogaria Venancio): ao enviar o PDF, as filiais e as datas da ação são **lidas automaticamente** e o sistema aponta as lojas da rede que ficaram fora da carta. Exigência por rede (Venancio exige; Cristal aparece como “Não exigida”) com exceção por loja. Abrir, baixar, substituir (versão anterior preservada), editar lojas/datas, excluir (lógica) e histórico. Vencimento: verde (> 30 dias), amarelo (30–8), vermelho (7–0) e vermelho crítico (expirada). Por padrão **não bloqueia** visitas (configurável).
 - **Lojas** — CRUD, busca e filtros, mapa (OpenStreetMap), geocodificação e **cadastro rápido** (a aba "Cadastro Rápido" da planilha virou funcionalidade).
 - **Despesas** — ônibus, metrô, trem, integração, táxi, aplicativo e outros; valor estimado e valor pago; totais diário/semanal/mensal e média por visita.
 - **Relatórios** — Visitas, Rotas, Despesas, Autorizações, Histórico e Consolidado, em **PDF** (cabeçalho com marca, indicadores, gráfico, tabelas, paginação, rodapé) e **Excel** (abas Resumo/Visitas/Rotas/Lojas/Despesas/Autorizações, filtros, larguras, datas, moeda, status coloridos, cabeçalho congelado).
-- **Painel público** — `/public/dashboard/:token`, somente leitura, token imprevisível (256 bits, só o hash é salvo), revogável, expiração opcional e escopos (visitas, fotos, autorizações, despesas, rotas).
+- **Edição depois de finalizar** — resultado, motivo, observações e horários de uma visita finalizada podem ser corrigidos; fotos, atividades e gastos podem ser adicionados depois. Tudo fica no histórico e na auditoria.
+- **Usuários e permissões** — Administrador (tudo), Gestor (acompanha a operação, relatórios e links públicos) e Funcionário (opera o próprio dia). O administrador cria usuários, redefine senhas, desativa acessos, **transfere a operação** (roteiros, rotas, visitas e endereço de casa) e acompanha o dia de cada funcionário (“visualizando”).
+- **Painel público** — `/public/dashboard/:token`, somente leitura, sem login e **sem expiração**: funciona até ser desativado (reversível) ou revogado (definitivo); o link pode ser copiado de novo a qualquer momento. Escopos: visitas, fotos, autorizações, despesas, rotas.
+- **Geocodificação automática** — latitude/longitude das lojas e da casa obtidas sozinhas (OpenStreetMap, gratuito; ou Google), restritas ao município do Rio, ao iniciar a API e a cada 6 horas.
 - **Notificações internas, auditoria, PWA, dark/light/sistema, mobile-first.**
 
 ## Stack
@@ -139,9 +143,9 @@ Um único processo Node.js serve API e frontend; banco MySQL/MariaDB do plano; a
 ## Observações importantes
 
 - **npm 10:** o `npm install` sem lockfile do npm 10 (que acompanha o Node 22) tem um bug interno com dependências opcionais deste monorepo. Use `npm ci` (o `package-lock.json` está incluído). Para **alterar** dependências, use `npx npm@11 install <pacote>`.
-- **Coordenadas:** a planilha não traz latitude/longitude. Distâncias, custos estimados e otimização dependem delas: rode `npm run geocode:stores` (OpenStreetMap, gratuito, ~1 loja/s) ou informe manualmente. Os links do Google Maps funcionam sem coordenadas.
+- **Coordenadas:** obtidas automaticamente (OpenStreetMap) alguns segundos após a API iniciar — ~1 minuto para as 43 lojas. Endereços sem número (V104, V127) ficam com localização aproximada da rua; complete-os no cadastro da loja.
 - **Tarifas:** a planilha não traz valores de transporte. O seed cria tarifas de **referência marcadas como não confirmadas** (ônibus R$ 4,70, MetrôRio R$ 7,90, SuperVia R$ 7,60); confirme os valores vigentes em Configurações › Tarifas.
-- **Transporte público real** (linhas, horários) exige `ROUTE_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` (Routes API). Sem chave, o sistema usa e rotula claramente uma **estimativa local**.
+- **Transporte público:** o Google Maps não aceita uma rota de transporte público com várias paradas num único link — por isso cada trecho (e o botão “próxima loja”) abre o trajeto real de transporte público no Google Maps. Dentro do app, sem chave, tempos e custos são **estimativas** rotuladas; com `ROUTE_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` (Routes API) aparecem linhas, estações e tempos reais, e a otimização usa esses tempos (veja docs/deployment.md).
 - **Domínio:** o domínio principal informado é `forgedevapps.com`, mas a aplicação usa `routeflow.forgedevapps.com.br`; o `.com.br` precisa estar registrado e apontado para a Hostinger.
 - **Privacidade:** a planilha contém o endereço residencial. Em repositório público, considere manter `data/` fora do Git (use `SEED_SPREADSHEET_PATH`).
 - **Armazenamento S3/R2** e **offline completo** ainda não estão implementados (a interface `StorageDriver` e o PWA já estão preparados).

@@ -10,6 +10,7 @@ export * from './domain/quick-add';
 export * from './domain/maps';
 export * from './domain/geo';
 export * from './domain/optimizer';
+export * from './domain/letter-parser';
 export * from './domain/money';
 export * from './schemas/common';
 export * from './schemas/auth';

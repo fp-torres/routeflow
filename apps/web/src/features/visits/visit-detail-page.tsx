@@ -15,6 +15,8 @@ import {
   StickyNote,
   Trash,
   Wallet,
+  Bus,
+  Pencil,
 } from 'lucide-react';
 import * as React from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
@@ -63,6 +65,7 @@ import { StoreAuthBadge, ValidityBadge, VisitStatusBadge } from '@/components/st
 import { api, upload } from '@/lib/api';
 import { currentPosition } from '@/lib/geo';
 import { keys, useInvalidateOperation, useVisit } from '@/lib/queries';
+import { VisitEditDialog } from './visit-edit-dialog';
 
 type DialogKind = 'note' | 'activity' | 'finish' | 'reschedule' | 'expense' | null;
 
@@ -73,6 +76,7 @@ export function VisitDetailPage() {
   const invalidate = useInvalidateOperation();
   const visit = useVisit(id);
   const [dialog, setDialog] = React.useState<DialogKind>(null);
+  const [editing, setEditing] = React.useState(false);
   const [text, setText] = React.useState('');
   const [category, setCategory] = React.useState<PhotoCategory>('FACADE');
   const [finish, setFinish] = React.useState<{
@@ -247,9 +251,18 @@ export function VisitDetailPage() {
         </CardHeader>
         <CardContent className="flex flex-col gap-3">
           <p className="text-[1.05rem]">{v.store.fullAddress}</p>
+          <Button asChild size="lg" variant="line" block>
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(v.store.fullAddress)}&travelmode=transit`}
+              target="_blank"
+              rel="noreferrer"
+            >
+              <Bus /> Como chegar (transporte público)
+            </a>
+          </Button>
           <Button asChild size="lg" variant="outline" block>
             <a href={v.store.mapsUrl} target="_blank" rel="noreferrer">
-              <ExternalLink /> Abrir no Google Maps
+              <ExternalLink /> Ver no mapa
             </a>
           </Button>
         </CardContent>
@@ -271,6 +284,20 @@ export function VisitDetailPage() {
               <p className="text-sm text-muted-foreground">
                 Vencimento: {formatDateBR(letter.expirationDate)}
               </p>
+              {(() => {
+                const days = letter.stores.find((s) => s.id === v.store.id)?.dates ?? [];
+                if (!days.length) return null;
+                const listed = days.includes(v.scheduledDate);
+                return (
+                  <p
+                    className={listed ? 'text-sm' : 'text-sm font-semibold text-warning-foreground'}
+                  >
+                    Datas da ação nesta loja:{' '}
+                    {days.map((d) => formatDateBR(d).slice(0, 5)).join(', ')}
+                    {listed ? '' : ' — a data desta visita não está na carta.'}
+                  </p>
+                );
+              })()}
               <div className="grid grid-cols-2 gap-2">
                 <Button asChild size="lg">
                   <a href={letter.url} target="_blank" rel="noreferrer">
@@ -437,16 +464,32 @@ export function VisitDetailPage() {
         </Button>
       ) : null}
 
-      {v.notes ? (
+      {v.notes || closed ? (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
             <CardTitle>Observações</CardTitle>
+            {closed ? (
+              <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                <Pencil /> Editar visita
+              </Button>
+            ) : null}
           </CardHeader>
           <CardContent>
-            <p className="whitespace-pre-line">{v.notes}</p>
+            {v.notes ? (
+              <p className="whitespace-pre-line">{v.notes}</p>
+            ) : (
+              <p className="text-sm text-muted-foreground">Sem observações.</p>
+            )}
+            {closed ? (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Esqueceu algo? Edite a visita e adicione fotos, atividades e gastos mesmo depois de
+                finalizada — tudo fica no histórico.
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
+      <VisitEditDialog visit={v} open={editing} onOpenChange={setEditing} />
 
       {v.expenses.length ? (
         <Card>

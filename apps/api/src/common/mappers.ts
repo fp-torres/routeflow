@@ -22,6 +22,8 @@ export interface StoreRow {
   latitude: number | null;
   longitude: number | null;
   geocodeSource: string | null;
+  geocodeStatus: string | null;
+  authorizationRequired: boolean | null;
   observations: string | null;
   active: boolean;
   createdAt: Date;
@@ -61,6 +63,8 @@ export function toStoreDto(
     observations: store.observations,
     active: store.active,
     geocodeSource: store.geocodeSource,
+    geocodeStatus: store.geocodeStatus,
+    authorizationRequired: store.authorizationRequired,
     createdAt: isoInstant(store.createdAt),
     updatedAt: isoInstant(store.updatedAt),
     authorization,
@@ -68,6 +72,7 @@ export function toStoreDto(
 }
 
 export const NO_AUTHORIZATION: StoreAuthorizationInfo = {
+  required: true,
   validity: null,
   daysLeft: null,
   hasValid: false,

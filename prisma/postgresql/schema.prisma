@@ -127,19 +127,19 @@ model User {
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  refreshTokens      RefreshToken[]
-  homeAddresses      HomeAddress[]
-  routes             Route[]
-  visits             Visit[]
-  expenses           TransportExpense[]
-  notifications      Notification[]
-  auditLogs          AuditLog[]
-  routeTemplates     RouteTemplate[]
-  uploadedLetters    AuthorizationLetter[]
-  letterHistory      AuthorizationLetterHistory[]
-  visitActivities    VisitActivity[]
-  sharedAccesses     SharedAccess[]
-  importRuns         ImportRun[]
+  refreshTokens   RefreshToken[]
+  homeAddresses   HomeAddress[]
+  routes          Route[]
+  visits          Visit[]
+  expenses        TransportExpense[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  routeTemplates  RouteTemplate[]
+  uploadedLetters AuthorizationLetter[]
+  letterHistory   AuthorizationLetterHistory[]
+  visitActivities VisitActivity[]
+  sharedAccesses  SharedAccess[]
+  importRuns      ImportRun[]
 
   @@map("users")
 }
@@ -181,30 +181,34 @@ model HomeAddress {
 // ----------------------------- Lojas ---------------------------------
 
 model Store {
-  id            String    @id @default(uuid()) @db.VarChar(36)
-  code          String    @unique @db.VarChar(40)
-  importKey     String?   @unique @db.VarChar(191)
-  name          String    @db.VarChar(191)
-  network       String    @db.VarChar(120)
-  address       String    @db.VarChar(500)
-  neighborhood  String?   @db.VarChar(120)
-  city          String    @default("Rio de Janeiro") @db.VarChar(120)
-  state         String    @default("RJ") @db.VarChar(2)
-  zipCode       String?   @db.VarChar(9)
-  region        String?   @db.VarChar(80)
-  latitude      Float?
-  longitude     Float?
-  geocodeSource String?   @db.VarChar(40)
-  geocodedAt    DateTime?
-  observations  String?   @db.Text
-  active        Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id                    String    @id @default(uuid()) @db.VarChar(36)
+  code                  String    @unique @db.VarChar(40)
+  importKey             String?   @unique @db.VarChar(191)
+  name                  String    @db.VarChar(191)
+  network               String    @db.VarChar(120)
+  address               String    @db.VarChar(500)
+  neighborhood          String?   @db.VarChar(120)
+  city                  String    @default("Rio de Janeiro") @db.VarChar(120)
+  state                 String    @default("RJ") @db.VarChar(2)
+  zipCode               String?   @db.VarChar(9)
+  region                String?   @db.VarChar(80)
+  latitude              Float?
+  longitude             Float?
+  geocodeSource         String?   @db.VarChar(40)
+  geocodedAt            DateTime?
+  geocodeStatus         String?   @db.VarChar(20)
+  geocodeAttemptedAt    DateTime?
+  // null = segue a regra da rede (Configurações); true/false = exceção desta loja
+  authorizationRequired Boolean?
+  observations          String?   @db.Text
+  active                Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 
-  authorizationLetters AuthorizationLetter[]
-  visits               Visit[]
-  routeStops           RouteStop[]
-  templateStops        RouteTemplateStop[]
+  letterCoverages AuthorizationLetterStore[]
+  visits          Visit[]
+  routeStops      RouteStop[]
+  templateStops   RouteTemplateStop[]
 
   @@index([network])
   @@index([region])
@@ -217,8 +221,9 @@ model Store {
 
 model AuthorizationLetter {
   id             String              @id @default(uuid()) @db.VarChar(36)
-  storeId        String              @db.VarChar(36)
   title          String              @db.VarChar(191)
+  // Rede da carta (ex.: Drogaria Venancio). As lojas cobertas ficam em authorization_letter_stores.
+  network        String?             @db.VarChar(120)
   // Chave do arquivo no StorageService (ex.: authorizations/<loja>/<uuid>.pdf).
   // A API converte em URL assinada e temporária.
   fileUrl        String              @db.VarChar(500)
@@ -235,11 +240,10 @@ model AuthorizationLetter {
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
-  store      Store                        @relation(fields: [storeId], references: [id], onDelete: Cascade)
   uploadedBy User?                        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
   history    AuthorizationLetterHistory[]
+  stores     AuthorizationLetterStore[]
 
-  @@index([storeId])
   @@index([expirationDate])
   @@index([status, deletedAt])
   @@map("authorization_letters")
@@ -264,35 +268,55 @@ model AuthorizationLetterHistory {
   @@map("authorization_letter_history")
 }
 
+/// Lojas cobertas por uma carta (uma carta da rede pode valer para dezenas de lojas)
+model AuthorizationLetterStore {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  letterId  String   @db.VarChar(36)
+  storeId   String   @db.VarChar(36)
+  // Datas da ação para a loja, extraídas da carta (JSON texto: ["2026-10-08", ...]); vazio = todo o período
+  dates     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  letter AuthorizationLetter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  store  Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([letterId, storeId])
+  @@index([storeId])
+  @@map("authorization_letter_stores")
+}
+
 // ------------------------- Rotas e roteiros --------------------------
 
 model Route {
-  id                     String        @id @default(uuid()) @db.VarChar(36)
-  employeeId             String        @db.VarChar(36)
-  date                   DateTime      @db.Date
-  status                 RouteStatus   @default(PLANNED)
-  region                 String?       @db.VarChar(80)
-  startAddress           String        @db.VarChar(500)
+  id                     String         @id @default(uuid()) @db.VarChar(36)
+  employeeId             String         @db.VarChar(36)
+  date                   DateTime       @db.Date
+  status                 RouteStatus    @default(PLANNED)
+  region                 String?        @db.VarChar(80)
+  startAddress           String         @db.VarChar(500)
   startLatitude          Float?
   startLongitude         Float?
   // Distância em metros, duração em segundos (casa -> lojas -> casa)
   estimatedDistance      Int?
   estimatedDuration      Int?
-  estimatedTransportCost Decimal?      @db.Decimal(10, 2)
-  actualTransportCost    Decimal?      @db.Decimal(10, 2)
+  estimatedTransportCost Decimal?       @db.Decimal(10, 2)
+  actualTransportCost    Decimal?       @db.Decimal(10, 2)
   // Último trecho (última loja -> casa)
   returnDistance         Int?
   returnDuration         Int?
   returnTransportMode    TransportMode?
-  returnTravelCost       Decimal?      @db.Decimal(10, 2)
-  returnSummary          String?       @db.VarChar(500)
-  legsProvider           String?       @db.VarChar(40)
+  returnTravelCost       Decimal?       @db.Decimal(10, 2)
+  returnSummary          String?        @db.VarChar(500)
+  // Itinerário do último trecho (JSON texto com as etapas: caminhada, ônibus, metrô, trem...)
+  returnSteps            String?        @db.Text
+  legsProvider           String?        @db.VarChar(40)
   legsComputedAt         DateTime?
-  templateId             String?       @db.VarChar(36)
-  notes                  String?       @db.Text
-  importKey              String?       @unique @db.VarChar(191)
-  createdAt              DateTime      @default(now())
-  updatedAt              DateTime      @updatedAt
+  optimizedAt            DateTime?
+  templateId             String?        @db.VarChar(36)
+  notes                  String?        @db.Text
+  importKey              String?        @unique @db.VarChar(191)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
 
   employee User               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   template RouteTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
@@ -319,6 +343,8 @@ model RouteStop {
   transportMode    TransportMode?
   travelCost       Decimal?       @db.Decimal(10, 2)
   travelSummary    String?        @db.VarChar(500)
+  // Itinerário do trecho (JSON texto com as etapas: caminhada, ônibus, metrô, trem...)
+  travelSteps      String?        @db.Text
 
   route Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
   store Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
@@ -538,21 +564,23 @@ model AuditLog {
 }
 
 model SharedAccess {
-  id           String    @id @default(uuid()) @db.VarChar(36)
-  label        String    @db.VarChar(120)
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  label          String    @db.VarChar(120)
   // Somente o hash SHA-256 do token é armazenado; o token é exibido uma única vez
-  tokenHash    String    @unique @db.VarChar(128)
-  tokenPreview String    @db.VarChar(12)
+  tokenHash      String    @unique @db.VarChar(128)
+  tokenPreview   String    @db.VarChar(12)
+  // Token cifrado (AES-256-GCM) para permitir copiar o link novamente
+  tokenEncrypted String?   @db.Text
   // Escopos separados por vírgula: visits,photos,authorizations,expenses,routes
-  scope        String    @db.VarChar(255)
-  expiresAt    DateTime?
-  active       Boolean   @default(true)
-  revokedAt    DateTime?
-  lastAccessAt DateTime?
-  accessCount  Int       @default(0)
-  createdById  String?   @db.VarChar(36)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  scope          String    @db.VarChar(255)
+  expiresAt      DateTime?
+  active         Boolean   @default(true)
+  revokedAt      DateTime?
+  lastAccessAt   DateTime?
+  accessCount    Int       @default(0)
+  createdById    String?   @db.VarChar(36)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
 

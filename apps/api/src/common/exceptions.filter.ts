@@ -82,13 +82,11 @@ export class AllExceptionsFilter implements ExceptionFilter {
       );
     }
     if (response.headersSent) return;
-    response
-      .status(status)
-      .json({
-        statusCode: status,
-        message,
-        ...(errors ? { errors } : {}),
-        requestId: request.requestId,
-      });
+    response.status(status).json({
+      statusCode: status,
+      message,
+      ...(errors ? { errors } : {}),
+      requestId: request.requestId,
+    });
   }
 }

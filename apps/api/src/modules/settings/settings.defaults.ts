@@ -6,9 +6,11 @@ export const DEFAULT_SETTINGS: CompanySettings = {
   authorizationWarningDays: 30,
   authorizationCriticalDays: 7,
   blockVisitWithoutAuthorization: false,
+  // Cristal não exige carta no momento; basta incluir a rede aqui (ou marcar a loja) se passar a exigir
+  authorizationRequiredNetworks: ['Drogaria Venancio'],
   autoGenerateRoutes: true,
   routeGenerationHorizonDays: 14,
-  fullRouteTravelMode: 'driving',
+  fullRouteTravelMode: 'walking',
   networks: ['Drogaria Venancio', 'Cristal'],
   regions: ['Zona Norte', 'Zona Sul', 'Centro / Zona Sul', 'Centro', 'Oeste'],
   activityPresets: [

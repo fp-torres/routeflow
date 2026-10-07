@@ -25,7 +25,7 @@ import { GeocodingModule } from '../geocoding/geocoding.module';
 import { GeocodingService } from '../geocoding/geocoding.service';
 import { FaresService } from './fares.service';
 import { EstimateRouteProvider, GoogleRoutesProvider } from './providers';
-import type { LegPoint, LegResult, RouteProvider } from './route-provider';
+import type { LegPoint, LegResult, RouteProvider, TravelMatrix } from './route-provider';
 
 @Injectable()
 export class TransportService {
@@ -38,7 +38,7 @@ export class TransportService {
     const estimate = new EstimateRouteProvider(fares);
     this.provider =
       config.routing.provider === 'google'
-        ? new GoogleRoutesProvider(config.routing.googleApiKey, fares, estimate)
+        ? new GoogleRoutesProvider(config.routing.googleApiKey, fares, estimate, config.timeZone)
         : estimate;
   }
 
@@ -49,7 +49,7 @@ export class TransportService {
             provider: 'google',
             configured: true,
             description:
-              'Google Routes API — transporte público real (ônibus, metrô, trem e caminhada).',
+              'Google Routes API — itinerários reais de transporte público (ônibus, metrô, trem, VLT e caminhada), com linhas, tempos e otimização por tempo de viagem.',
           }
         : {
             provider: 'google',
@@ -62,12 +62,16 @@ export class TransportService {
       provider: 'estimate',
       configured: true,
       description:
-        'Estimativa local (distância em linha reta × fator urbano + tarifas cadastradas). Configure ROUTE_PROVIDER=google para trajetos reais.',
+        'Modelo local de transporte público (caminhada até ~1,2 km; acima disso, caminhada + espera + viagem a 17 km/h). Os botões abrem o trajeto real de transporte público no Google Maps. Para itinerários com linhas e tempos reais no app, configure ROUTE_PROVIDER=google e GOOGLE_MAPS_API_KEY (Routes API).',
     };
   }
 
   computeLeg(from: LegPoint, to: LegPoint, date: string): Promise<LegResult> {
     return this.provider.computeLeg(from, to, date);
+  }
+
+  computeMatrix(points: LegPoint[], date: string): Promise<TravelMatrix> {
+    return this.provider.computeMatrix(points, date);
   }
 }
 
