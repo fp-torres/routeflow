@@ -1,0 +1,24 @@
+@import 'tailwindcss';
+@import '../../../packages/ui/src/styles.css';
+@source '../../../packages/ui/src';
+
+@keyframes rf-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes rf-rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+
+@utility h-13 {
+  height: 3.25rem;
+}
+
+.recharts-surface:focus,
+.recharts-wrapper:focus {
+  outline: none;
+}

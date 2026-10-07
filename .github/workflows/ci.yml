@@ -1,0 +1,116 @@
+# CI do RouteFlow: qualidade (lint, tipos, testes unitários, build) e
+# integração real nos DOIS bancos (PostgreSQL de desenvolvimento e
+# MariaDB/MySQL de produção), incluindo verificação de divergência
+# entre migrations e schema Prisma.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  JWT_SECRET: ci-only-secret-ci-only-secret-ci-only-secret
+  NODE_ENV: test
+
+jobs:
+  quality:
+    name: Lint, tipos, testes unitários e build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Paridade dos schemas Prisma (PostgreSQL x MySQL)
+        run: npm run db:check
+      - run: npm run db:generate
+      - run: npm run build:packages
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test:unit
+      - run: npm run build
+      - name: Pacote de produção (verificação)
+        run: node scripts/prepare-release.mjs
+
+  postgres:
+    name: Integração — PostgreSQL
+    needs: quality
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: routeflow
+          POSTGRES_PASSWORD: routeflow
+          POSTGRES_DB: routeflow_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U routeflow" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_PROVIDER: postgresql
+      DATABASE_URL: postgresql://routeflow:routeflow@localhost:5432/routeflow_test?schema=public
+      SHADOW_DATABASE_URL: postgresql://routeflow:routeflow@localhost:5432/routeflow_shadow?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate && npm run build:packages
+      - run: PGPASSWORD=routeflow psql -h localhost -U routeflow -d routeflow_test -c "CREATE DATABASE routeflow_shadow;"
+      - name: Aplicar migrations
+        run: npm run db:deploy:postgres
+      - name: Migrations x schema sem divergência
+        run: npx prisma migrate diff --config prisma/postgresql/prisma.config.ts --from-migrations prisma/postgresql/migrations --to-schema prisma/postgresql/schema.prisma --exit-code
+      - name: Testes de integração/API (e2e)
+        run: npm run test:e2e
+        env:
+          E2E_DATABASE_PROVIDER: postgresql
+          E2E_DATABASE_URL: postgresql://routeflow:routeflow@localhost:5432/routeflow_test?schema=public
+      - name: Seed + importação da planilha (2x, idempotência)
+        run: npm run db:seed:postgres && npm run db:seed:postgres
+
+  mysql:
+    name: Integração — MariaDB/MySQL (produção)
+    needs: quality
+    runs-on: ubuntu-latest
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: routeflow
+          MARIADB_DATABASE: routeflow_test
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized" --health-interval 5s --health-timeout 5s --health-retries 15
+    env:
+      DATABASE_PROVIDER: mysql
+      DATABASE_URL: mysql://root:routeflow@127.0.0.1:3306/routeflow_test
+      SHADOW_DATABASE_URL: mysql://root:routeflow@127.0.0.1:3306/routeflow_shadow
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - run: npm run db:generate && npm run build:packages
+      - name: Aplicar migrations
+        run: npm run db:deploy:mysql
+      - name: Migrations x schema sem divergência
+        run: npx prisma migrate diff --config prisma/mysql/prisma.config.ts --from-migrations prisma/mysql/migrations --to-schema prisma/mysql/schema.prisma --exit-code
+      - name: Testes de integração/API (e2e)
+        run: npm run test:e2e
+        env:
+          E2E_DATABASE_PROVIDER: mysql
+          E2E_DATABASE_URL: mysql://root:routeflow@127.0.0.1:3306/routeflow_test
+      - name: Seed + importação da planilha (2x, idempotência)
+        run: npm run db:seed:mysql && npm run db:seed:mysql

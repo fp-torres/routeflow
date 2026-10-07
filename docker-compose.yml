@@ -1,0 +1,76 @@
+# RouteFlow — infraestrutura de DESENVOLVIMENTO LOCAL.
+# Produção (Hostinger Business) NÃO usa Docker: veja docs/deployment.md.
+#
+#   docker compose up -d                      -> PostgreSQL (padrão do desenvolvimento)
+#   docker compose --profile mysql up -d      -> + MariaDB (para testar o banco de produção)
+#   docker compose --profile app up -d --build -> + aplicação completa em container (opcional)
+
+name: routeflow
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: routeflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-routeflow}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-routeflow}
+      POSTGRES_DB: ${POSTGRES_DB:-routeflow}
+      TZ: America/Sao_Paulo
+    ports:
+      - '${POSTGRES_PORT:-5432}:5432'
+    volumes:
+      - routeflow-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER:-routeflow} -d ${POSTGRES_DB:-routeflow}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mariadb:
+    image: mariadb:10.11
+    container_name: routeflow-mariadb
+    profiles: ['mysql']
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD:-routeflow-root}
+      MARIADB_DATABASE: ${MARIADB_DATABASE:-routeflow}
+      MARIADB_USER: ${MARIADB_USER:-routeflow}
+      MARIADB_PASSWORD: ${MARIADB_PASSWORD:-routeflow}
+      TZ: America/Sao_Paulo
+    command: ['--character-set-server=utf8mb4', '--collation-server=utf8mb4_unicode_ci']
+    ports:
+      - '${MARIADB_PORT:-3306}:3306'
+    volumes:
+      - routeflow-mariadb-data:/var/lib/mysql
+    healthcheck:
+      test: ['CMD', 'healthcheck.sh', '--connect', '--innodb_initialized']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    profiles: ['app']
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: routeflow-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_PROVIDER: postgresql
+      DATABASE_URL: postgresql://${POSTGRES_USER:-routeflow}:${POSTGRES_PASSWORD:-routeflow}@postgres:5432/${POSTGRES_DB:-routeflow}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-dev-only-change-me-dev-only}
+      APP_URL: http://localhost:3000
+      STORAGE_PATH: /data/storage
+    ports:
+      - '3000:3000'
+    volumes:
+      - routeflow-storage:/data/storage
+
+volumes:
+  routeflow-postgres-data:
+  routeflow-mariadb-data:
+  routeflow-storage:

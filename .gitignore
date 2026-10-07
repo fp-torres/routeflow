@@ -1,0 +1,30 @@
+# Dependências
+node_modules/
+
+# Builds
+dist/
+build/
+release/
+coverage/
+*.tsbuildinfo
+apps/web/dev-dist/
+
+# Prisma Client gerado (rode npm run db:generate)
+apps/api/src/generated/
+
+# Ambiente e segredos — nunca versionar
+.env
+.env.*
+!.env.example
+
+# Arquivos enviados pelos usuários (fotos, PDFs) e relatórios de importação
+storage/
+
+# Logs e sistema
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json

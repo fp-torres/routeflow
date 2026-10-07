@@ -1,0 +1,18 @@
+{
+  "name": "@routeflow/config",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Configurações compartilhadas (TypeScript, ESLint, Prettier) do RouteFlow.",
+  "files": [
+    "tsconfig.base.json",
+    "tsconfig.node.json",
+    "tsconfig.react.json",
+    "eslint.config.mjs"
+  ],
+  "exports": {
+    "./tsconfig.base.json": "./tsconfig.base.json",
+    "./tsconfig.node.json": "./tsconfig.node.json",
+    "./tsconfig.react.json": "./tsconfig.react.json",
+    "./eslint": "./eslint.config.mjs"
+  }
+}

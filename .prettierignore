@@ -1,0 +1,9 @@
+node_modules
+dist
+coverage
+storage
+release
+**/generated
+prisma/**/migrations
+package-lock.json
+*.xlsx

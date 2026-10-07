@@ -1,0 +1,68 @@
+# CD do RouteFlow para Hostinger Business Web Hosting (sem VPS).
+#
+# Fluxo principal (sem segredos): após o CI passar na main, o pacote de
+# produção pré-compilado é publicado na branch "deploy". No hPanel, o
+# Node.js Web App fica conectado a essa branch (deploy automático do Git).
+#
+# Opcional (com segredos): envio por SSH + migrations no servidor.
+name: Deploy (Hostinger)
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Build (clients Prisma, pacotes, web e API)
+        run: npm run build
+      - name: Montar pacote de produção
+        run: node scripts/prepare-release.mjs --zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: routeflow-release
+          path: routeflow-release.zip
+          retention-days: 14
+      - name: Publicar branch "deploy" (Git da Hostinger)
+        run: |
+          cd release
+          git init -q -b deploy
+          git add -A
+          git -c user.name="RouteFlow CI" -c user.email="ci@users.noreply.github.com" commit -q -m "Release ${{ github.event.workflow_run.head_sha || github.sha }}"
+          git push -q --force "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" deploy
+
+      - name: Deploy por SSH (opcional)
+        env:
+          SSH_HOST: ${{ secrets.HOSTINGER_SSH_HOST }}
+          SSH_PORT: ${{ secrets.HOSTINGER_SSH_PORT }}
+          SSH_USER: ${{ secrets.HOSTINGER_SSH_USER }}
+          SSH_KEY: ${{ secrets.HOSTINGER_SSH_KEY }}
+          APP_PATH: ${{ secrets.HOSTINGER_APP_PATH }}
+          RESTART_COMMAND: ${{ secrets.HOSTINGER_RESTART_COMMAND }}
+        if: env.SSH_HOST != ''
+        run: |
+          mkdir -p ~/.ssh && echo "$SSH_KEY" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p "${SSH_PORT:-65002}" "$SSH_HOST" >> ~/.ssh/known_hosts
+          rsync -az --delete --exclude node_modules --exclude .env -e "ssh -p ${SSH_PORT:-65002}" release/ "$SSH_USER@$SSH_HOST:$APP_PATH/"
+          ssh -p "${SSH_PORT:-65002}" "$SSH_USER@$SSH_HOST" "cd '$APP_PATH' && npm install --omit=dev --no-audit --no-fund && npm run db:deploy && (${RESTART_COMMAND:-true})"
