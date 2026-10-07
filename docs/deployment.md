@@ -27,33 +27,27 @@ A produção é **um único Node.js Web App** (NestJS servindo API e o build do 
 
 A porta (`PORT`) é definida pela Hostinger. **Nunca** suba o arquivo `.env` para o repositório.
 
-## 3. Aplicação Node.js — opção A (recomendada): pacote pré-compilado
+## 3. Aplicação Node.js — opção A (recomendada): branch `deploy` pré-compilada
 
-O GitHub Actions compila tudo e publica o pacote de produção na branch **`deploy`** (sem builds pesados no servidor compartilhado).
+O GitHub Actions testa e compila tudo e publica o pacote de produção na branch **`deploy`** (o servidor compartilhado não precisa compilar nada).
 
-1. hPanel › **Websites › Adicionar › Node.js Web App** › importar do GitHub `fp-torres/routeflow`, branch **`deploy`**.
-2. Versão do Node: **22.x**. Diretório raiz: `/`.
-3. Comando de build: `npm install --omit=dev` (o `build` do pacote é um no-op).
-4. Comando de start: `npm start` — arquivo de entrada: `dist/main.js`.
-5. Configure as variáveis (passo 2) e publique.
-6. Primeira vez, pelo terminal SSH do hPanel (Business inclui SSH, porta 65002), na pasta da aplicação:
-   ```bash
-   npm run db:deploy                       # migrations MySQL/MariaDB
-   SEED_USER_PASSWORD='senha-forte' npm run db:seed   # usuário + configurações + planilha
-   npm run geocode:stores                  # opcional: coordenadas das lojas
-   ```
-   O `db:deploy` usa o Prisma CLI, que baixa o "schema engine" de `binaries.prisma.sh` na primeira execução.
+1. Envie o código para a `main` do GitHub e aguarde o workflow **CI** e depois o **Deploy (Hostinger)** (aba Actions). Na primeira vez, se preferir, rode o **Deploy (Hostinger)** manualmente (“Run workflow”) para criar a branch `deploy`.
+2. hPanel › **Sites › Criar site › Web app Node.js** › **Importar repositório Git** › **Conecte-se com GitHub** (funciona com repositório privado — recomendado) › escolha `fp-torres/routeflow` e a branch **`deploy`**.
+3. Configurações de build: Node.js **22.x**; diretório raiz `/`; comando de instalação `npm install` (o pacote só tem dependências de produção); comando de build: deixe o padrão (`npm run build` é um no-op neste pacote); arquivo de entrada **`dist/main.js`** (ou comando de start `npm start`).
+4. Variáveis de ambiente (passo 2 desta página) **mais**, no primeiro deploy:
+   - `MIGRATE_ON_START=true` — aplica as migrations ao iniciar (deixe sempre ligado: a cada deploy o banco é atualizado sozinho);
+   - `SEED_ON_START=true`, `SEED_USER_EMAIL`, `SEED_USER_NAME`, `SEED_USER_PASSWORD` — cria o administrador e importa a planilha. **Depois do primeiro acesso, troque `SEED_ON_START` para `false`.**
+5. Implantar. Ao terminar, abra o domínio e entre com o e-mail/senha do seed.
 
-O pacote também pode ser gerado localmente (`npm run build && npm run release:prepare -- --zip`) e enviado como ZIP pelo hPanel.
+A partir daí o CI/CD é automático: **push na `main` → CI (lint, tipos, testes em PostgreSQL e MariaDB) → Deploy publica a branch `deploy` → a Hostinger reimplanta sozinha → as migrations rodam no start.**
+
+Com terminal SSH (opcional), o equivalente manual é: `npm install --omit=dev && npm run db:deploy && npm run db:seed && npm start`.
+
+O pacote também pode ser gerado localmente (`npm run build && npm run release:prepare -- --zip`) e enviado em **Faça upload dos arquivos**.
 
 ## 3. Aplicação Node.js — opção B: build no servidor
 
-Conecte a branch **`main`** e use:
-
-- Build: `npm ci && npm run build`
-- Start: `npm run start:prod` (entrada `apps/api/dist/main.js`)
-
-É mais pesada (instala dependências de desenvolvimento e compila no plano compartilhado); prefira a opção A.
+Conecte a branch **`main`** e use build `npm ci && npm run build` e start `npm run start:prod` (entrada `apps/api/dist/main.js`). É bem mais pesado para o plano compartilhado (instala ~1.600 pacotes de desenvolvimento); prefira a opção A.
 
 ## 4. Domínio, HTTPS e cookies
 

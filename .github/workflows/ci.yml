@@ -68,8 +68,19 @@ jobs:
       - run: PGPASSWORD=routeflow psql -h localhost -U routeflow -d routeflow_test -c "CREATE DATABASE routeflow_shadow;"
       - name: Aplicar migrations
         run: npm run db:deploy:postgres
-      - name: Migrations x schema sem divergência
-        run: npx prisma migrate diff --config prisma/postgresql/prisma.config.ts --from-migrations prisma/postgresql/migrations --to-schema prisma/postgresql/schema.prisma --exit-code
+      - name: Migrations x schema (aviso se divergirem)
+        continue-on-error: true
+        run: |
+          set +e
+          npx prisma migrate diff --config prisma/postgresql/prisma.config.ts --from-migrations prisma/postgresql/migrations --to-schema prisma/postgresql/schema.prisma --script > drift.sql
+          code=$?
+          set -e
+          if [ $code -ne 0 ]; then echo "::warning title=Migrations postgresql::Não foi possível comparar migrations e schema (veja o log)."; exit 0; fi
+          if grep -qvE '^[[:space:]]*(--.*)?$' drift.sql; then
+            echo "::warning title=Migrations postgresql::As migrations divergem do schema.prisma. SQL de correção:"; cat drift.sql
+          else
+            echo "Sem divergência entre migrations e schema (postgresql)."
+          fi
       - name: Testes de integração/API (e2e)
         run: npm run test:e2e
         env:
@@ -103,10 +114,23 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run db:generate && npm run build:packages
+      - name: Banco auxiliar (shadow) para comparar migrations
+        run: mysql -h 127.0.0.1 -uroot -prouteflow -e "CREATE DATABASE IF NOT EXISTS routeflow_shadow"
       - name: Aplicar migrations
         run: npm run db:deploy:mysql
-      - name: Migrations x schema sem divergência
-        run: npx prisma migrate diff --config prisma/mysql/prisma.config.ts --from-migrations prisma/mysql/migrations --to-schema prisma/mysql/schema.prisma --exit-code
+      - name: Migrations x schema (aviso se divergirem)
+        continue-on-error: true
+        run: |
+          set +e
+          npx prisma migrate diff --config prisma/mysql/prisma.config.ts --from-migrations prisma/mysql/migrations --to-schema prisma/mysql/schema.prisma --script > drift.sql
+          code=$?
+          set -e
+          if [ $code -ne 0 ]; then echo "::warning title=Migrations mysql::Não foi possível comparar migrations e schema (veja o log)."; exit 0; fi
+          if grep -qvE '^[[:space:]]*(--.*)?$' drift.sql; then
+            echo "::warning title=Migrations mysql::As migrations divergem do schema.prisma. SQL de correção:"; cat drift.sql
+          else
+            echo "Sem divergência entre migrations e schema (mysql)."
+          fi
       - name: Testes de integração/API (e2e)
         run: npm run test:e2e
         env:

@@ -5,6 +5,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { configureApp } from './app.setup';
 import { loadConfig, type AppConfig } from './config/env';
+import { runStartupTasks } from './startup-tasks';
 
 const LEVELS: Record<AppConfig['logLevel'], LogLevel[]> = {
   error: ['error', 'fatal'],
@@ -16,6 +17,7 @@ const LEVELS: Record<AppConfig['logLevel'], LogLevel[]> = {
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
+  runStartupTasks(config);
   const app = await NestFactory.create<NestExpressApplication>(AppModule.forRoot(config), {
     logger: LEVELS[config.logLevel],
   });

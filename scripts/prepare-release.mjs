@@ -98,7 +98,7 @@ const pkg = {
 fs.writeFileSync(path.join(out, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
 fs.writeFileSync(
   path.join(out, 'README-DEPLOY.md'),
-  `# RouteFlow — pacote de produção\n\n1. Variáveis de ambiente no hPanel (veja .env.example): NODE_ENV=production, DATABASE_PROVIDER=mysql, DATABASE_URL, JWT_SECRET, APP_URL, TRUST_PROXY=true, STORAGE_PATH (pasta FORA desta aplicação).\n2. Instalar: npm install --omit=dev\n3. Migrations (MySQL/MariaDB): npm run db:deploy\n4. Seed inicial (usuário + planilha): SEED_USER_PASSWORD=... npm run db:seed\n5. Iniciar: npm start  (arquivo de entrada: dist/main.js)\n\nGuia completo: docs/deployment.md no repositório.\n`,
+  `# RouteFlow — pacote de produção\n\nNode.js 22 · entrada: dist/main.js · start: npm start · build: não precisa (pacote pré-compilado).\n\nVariáveis obrigatórias: NODE_ENV=production, DATABASE_PROVIDER=mysql, DATABASE_URL, JWT_SECRET (48+ caracteres), APP_URL, TRUST_PROXY=true, STORAGE_PATH (pasta FORA desta aplicação).\n\nSem terminal: MIGRATE_ON_START=true aplica as migrations ao iniciar; SEED_ON_START=true (só no 1º deploy, com SEED_USER_EMAIL e SEED_USER_PASSWORD) cria o usuário e importa a planilha.\n\nCom terminal: npm install --omit=dev && npm run db:deploy && npm run db:seed && npm start\n\nGuia completo: docs/deployment.md no repositório.\n`,
 );
 
 if (args.has('--zip')) {
