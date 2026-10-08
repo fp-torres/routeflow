@@ -1,0 +1,1 @@
+function e(e){let t={};for(let n of e.issues){let e=n.path.join(`.`)||`_`;t[e]||(t[e]=n.message)}return t}export{e as t};

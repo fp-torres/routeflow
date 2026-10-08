@@ -1,0 +1,624 @@
+// =====================================================================
+// RouteFlow — modelo de dados (MySQL/MariaDB · produção Hostinger)
+//
+// IMPORTANTE: prisma/postgresql/schema.prisma representa EXATAMENTE a mesma
+// modelagem de negócio. Os dois arquivos só podem diferir no bloco
+// `datasource` (provider) e no `output` do generator. A paridade é
+// verificada por `npm run db:check` (também no CI).
+//
+// Convenções de portabilidade PostgreSQL <-> MySQL/MariaDB:
+//  - IDs UUID gerados pelo Prisma em colunas VARCHAR(36);
+//  - todo String possui tipo nativo explícito (@db.VarChar / @db.Text);
+//  - valores monetários em DECIMAL(10,2);
+//  - datas de negócio (sem hora) em DATE; instantes em TIMESTAMP/DATETIME(3);
+//  - JSON armazenado como TEXT (serializado pela aplicação) para máxima
+//    compatibilidade com MariaDB;
+//  - tabelas em snake_case minúsculo (evita problemas de
+//    lower_case_table_names no MySQL).
+// =====================================================================
+
+generator client {
+  provider            = "prisma-client"
+  output              = "../../apps/api/src/generated/prisma/mysql"
+  moduleFormat        = "cjs"
+  importFileExtension = "js"
+  runtime             = "nodejs"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ----------------------------- Enums ---------------------------------
+
+enum UserRole {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+enum VisitStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  NOT_COMPLETED
+  RESCHEDULED
+  CANCELLED
+  BLOCKED
+}
+
+enum RouteStatus {
+  PLANNED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TransportMode {
+  WALKING
+  BUS
+  METRO
+  TRAIN
+  TRANSIT
+  DRIVING
+  TAXI
+  RIDE_APP
+  BICYCLE
+  OTHER
+}
+
+enum TransportType {
+  BUS
+  METRO
+  TRAIN
+  INTEGRATION
+  TAXI
+  RIDE_APP
+  OTHER
+}
+
+enum PhotoCategory {
+  FACADE
+  DISPLAY
+  PRODUCT
+  MATERIAL
+  RECEIPT
+  OTHER
+}
+
+enum AuthorizationStatus {
+  ACTIVE
+  REVOKED
+}
+
+enum NotificationType {
+  AUTHORIZATION_EXPIRING
+  AUTHORIZATION_EXPIRED
+  VISIT_UPCOMING
+  VISIT_PENDING
+  ROUTE_CHANGED
+  SYSTEM
+}
+
+enum RouteTemplateKind {
+  STANDARD
+  WEEKLY
+  MONTHLY
+}
+
+enum VisitActivityType {
+  NOTE
+  ACTIVITY
+  STATUS_CHANGE
+  PHOTO
+  SYSTEM
+}
+
+// ----------------------------- Usuários ------------------------------
+
+model User {
+  id              String    @id @default(uuid()) @db.VarChar(36)
+  name            String    @db.VarChar(120)
+  email           String    @unique @db.VarChar(191)
+  passwordHash    String    @db.VarChar(255)
+  role            UserRole  @default(EMPLOYEE)
+  active          Boolean   @default(true)
+  lastLoginAt     DateTime?
+  // Foto de perfil otimizada (WebP 384×384) no StorageService
+  avatarKey       String?   @db.VarChar(255)
+  avatarUpdatedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  refreshTokens   RefreshToken[]
+  homeAddresses   HomeAddress[]
+  routes          Route[]
+  visits          Visit[]
+  expenses        TransportExpense[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  routeTemplates  RouteTemplate[]
+  uploadedLetters AuthorizationLetter[]
+  letterHistory   AuthorizationLetterHistory[]
+  visitActivities VisitActivity[]
+  sharedAccesses  SharedAccess[]
+  importRuns      ImportRun[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.VarChar(36)
+  userId       String    @db.VarChar(36)
+  tokenHash    String    @unique @db.VarChar(128)
+  expiresAt    DateTime
+  // "Lembrar acesso": cookie persistente (sobrevive ao fechar o navegador) x cookie de sessão
+  persistent   Boolean   @default(false)
+  revokedAt    DateTime?
+  replacedById String?   @db.VarChar(36)
+  userAgent    String?   @db.VarChar(255)
+  ipAddress    String?   @db.VarChar(64)
+  createdAt    DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model HomeAddress {
+  id         String   @id @default(uuid()) @db.VarChar(36)
+  employeeId String   @db.VarChar(36)
+  label      String?  @db.VarChar(80)
+  address    String   @db.VarChar(500)
+  latitude   Float?
+  longitude  Float?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  employee User @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, active])
+  @@map("home_addresses")
+}
+
+// ----------------------------- Lojas ---------------------------------
+
+model Store {
+  id                    String    @id @default(uuid()) @db.VarChar(36)
+  code                  String    @unique @db.VarChar(40)
+  importKey             String?   @unique @db.VarChar(191)
+  name                  String    @db.VarChar(191)
+  network               String    @db.VarChar(120)
+  address               String    @db.VarChar(500)
+  neighborhood          String?   @db.VarChar(120)
+  city                  String    @default("Rio de Janeiro") @db.VarChar(120)
+  state                 String    @default("RJ") @db.VarChar(2)
+  zipCode               String?   @db.VarChar(9)
+  region                String?   @db.VarChar(80)
+  latitude              Float?
+  longitude             Float?
+  geocodeSource         String?   @db.VarChar(40)
+  geocodedAt            DateTime?
+  geocodeStatus         String?   @db.VarChar(20)
+  geocodeAttemptedAt    DateTime?
+  // null = segue a regra da rede (Configurações); true/false = exceção desta loja
+  authorizationRequired Boolean?
+  observations          String?   @db.Text
+  active                Boolean   @default(true)
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  letterCoverages AuthorizationLetterStore[]
+  visits          Visit[]
+  routeStops      RouteStop[]
+  templateStops   RouteTemplateStop[]
+
+  @@index([network])
+  @@index([region])
+  @@index([neighborhood])
+  @@index([active])
+  @@map("stores")
+}
+
+// ---------------------- Cartas de autorização ------------------------
+
+model AuthorizationLetter {
+  id             String              @id @default(uuid()) @db.VarChar(36)
+  title          String              @db.VarChar(191)
+  // Rede da carta (ex.: Drogaria Venancio). As lojas cobertas ficam em authorization_letter_stores.
+  network        String?             @db.VarChar(120)
+  // Chave do arquivo no StorageService (ex.: authorizations/<loja>/<uuid>.pdf).
+  // A API converte em URL assinada e temporária.
+  fileUrl        String              @db.VarChar(500)
+  fileName       String              @db.VarChar(255)
+  mimeType       String              @db.VarChar(100)
+  fileSize       Int                 @default(0)
+  issueDate      DateTime?           @db.Date
+  validFrom      DateTime?           @db.Date
+  expirationDate DateTime?           @db.Date
+  status         AuthorizationStatus @default(ACTIVE)
+  notes          String?             @db.Text
+  uploadedById   String?             @db.VarChar(36)
+  deletedAt      DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  uploadedBy User?                        @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+  history    AuthorizationLetterHistory[]
+  stores     AuthorizationLetterStore[]
+
+  @@index([expirationDate])
+  @@index([status, deletedAt])
+  @@map("authorization_letters")
+}
+
+model AuthorizationLetterHistory {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  letterId  String   @db.VarChar(36)
+  // CREATED | UPDATED | FILE_REPLACED | DELETED
+  action    String   @db.VarChar(40)
+  fileUrl   String?  @db.VarChar(500)
+  fileName  String?  @db.VarChar(255)
+  // Snapshot JSON (texto) dos metadados no momento da ação
+  details   String?  @db.Text
+  userId    String?  @db.VarChar(36)
+  createdAt DateTime @default(now())
+
+  letter AuthorizationLetter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  user   User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([letterId, createdAt])
+  @@map("authorization_letter_history")
+}
+
+/// Lojas cobertas por uma carta (uma carta da rede pode valer para dezenas de lojas)
+model AuthorizationLetterStore {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  letterId  String   @db.VarChar(36)
+  storeId   String   @db.VarChar(36)
+  // Datas da ação para a loja, extraídas da carta (JSON texto: ["2026-10-08", ...]); vazio = todo o período
+  dates     String?  @db.Text
+  createdAt DateTime @default(now())
+
+  letter AuthorizationLetter @relation(fields: [letterId], references: [id], onDelete: Cascade)
+  store  Store               @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([letterId, storeId])
+  @@index([storeId])
+  @@map("authorization_letter_stores")
+}
+
+// ------------------------- Rotas e roteiros --------------------------
+
+model Route {
+  id                     String         @id @default(uuid()) @db.VarChar(36)
+  employeeId             String         @db.VarChar(36)
+  date                   DateTime       @db.Date
+  status                 RouteStatus    @default(PLANNED)
+  region                 String?        @db.VarChar(80)
+  startAddress           String         @db.VarChar(500)
+  startLatitude          Float?
+  startLongitude         Float?
+  // Distância em metros, duração em segundos (casa -> lojas -> casa)
+  estimatedDistance      Int?
+  estimatedDuration      Int?
+  estimatedTransportCost Decimal?       @db.Decimal(10, 2)
+  actualTransportCost    Decimal?       @db.Decimal(10, 2)
+  // Último trecho (última loja -> casa)
+  returnDistance         Int?
+  returnDuration         Int?
+  returnTransportMode    TransportMode?
+  returnTravelCost       Decimal?       @db.Decimal(10, 2)
+  returnSummary          String?        @db.VarChar(500)
+  // Itinerário do último trecho (JSON texto com as etapas: caminhada, ônibus, metrô, trem...)
+  returnSteps            String?        @db.Text
+  legsProvider           String?        @db.VarChar(40)
+  legsComputedAt         DateTime?
+  optimizedAt            DateTime?
+  templateId             String?        @db.VarChar(36)
+  notes                  String?        @db.Text
+  importKey              String?        @unique @db.VarChar(191)
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  employee User               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  template RouteTemplate?     @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  stops    RouteStop[]
+  visits   Visit[]
+  expenses TransportExpense[]
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@map("routes")
+}
+
+model RouteStop {
+  id               String         @id @default(uuid()) @db.VarChar(36)
+  routeId          String         @db.VarChar(36)
+  storeId          String         @db.VarChar(36)
+  visitId          String?        @unique @db.VarChar(36)
+  order            Int
+  estimatedArrival DateTime?
+  actualArrival    DateTime?
+  // Trecho a partir do ponto anterior (casa ou loja anterior)
+  travelDistance   Int?
+  travelDuration   Int?
+  transportMode    TransportMode?
+  travelCost       Decimal?       @db.Decimal(10, 2)
+  travelSummary    String?        @db.VarChar(500)
+  // Itinerário do trecho (JSON texto com as etapas: caminhada, ônibus, metrô, trem...)
+  travelSteps      String?        @db.Text
+
+  route Route  @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  store Store  @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  visit Visit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([routeId, order])
+  @@index([storeId])
+  @@map("route_stops")
+}
+
+model RouteTemplate {
+  id         String            @id @default(uuid()) @db.VarChar(36)
+  employeeId String            @db.VarChar(36)
+  name       String            @db.VarChar(120)
+  // STANDARD: dia da semana | WEEKLY: ciclo de N semanas | MONTHLY: semana do mês
+  kind       RouteTemplateKind @default(STANDARD)
+  cycleWeeks Int               @default(1)
+  anchorDate DateTime?         @db.Date
+  validFrom  DateTime?         @db.Date
+  validUntil DateTime?         @db.Date
+  active     Boolean           @default(true)
+  notes      String?           @db.Text
+  importKey  String?           @unique @db.VarChar(191)
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  employee User                @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  stops    RouteTemplateStop[]
+  routes   Route[]
+
+  @@index([employeeId, active])
+  @@map("route_templates")
+}
+
+model RouteTemplateStop {
+  id         String @id @default(uuid()) @db.VarChar(36)
+  templateId String @db.VarChar(36)
+  storeId    String @db.VarChar(36)
+  // Dia da semana ISO: 1 = segunda ... 7 = domingo
+  weekday    Int
+  // STANDARD: 0 | WEEKLY: 1..cycleWeeks | MONTHLY: 1..5 (semana do mês)
+  weekIndex  Int    @default(0)
+  order      Int
+
+  template RouteTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  store    Store         @relation(fields: [storeId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, weekIndex, weekday, storeId])
+  @@index([templateId, weekIndex, weekday, order])
+  @@index([storeId])
+  @@map("route_template_stops")
+}
+
+// ------------------------------ Visitas ------------------------------
+
+model Visit {
+  id                String      @id @default(uuid()) @db.VarChar(36)
+  routeId           String?     @db.VarChar(36)
+  storeId           String      @db.VarChar(36)
+  employeeId        String      @db.VarChar(36)
+  scheduledDate     DateTime    @db.Date
+  order             Int         @default(0)
+  status            VisitStatus @default(PENDING)
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  notes             String?     @db.Text
+  statusReason      String?     @db.VarChar(500)
+  latitudeAtStart   Float?
+  longitudeAtStart  Float?
+  accuracyAtStart   Float?
+  latitudeAtFinish  Float?
+  longitudeAtFinish Float?
+  accuracyAtFinish  Float?
+  rescheduledFromId String?     @unique @db.VarChar(36)
+  importKey         String?     @unique @db.VarChar(191)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  route           Route?             @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  store           Store              @relation(fields: [storeId], references: [id], onDelete: Restrict)
+  employee        User               @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  rescheduledFrom Visit?             @relation("VisitReschedule", fields: [rescheduledFromId], references: [id], onDelete: SetNull)
+  rescheduledTo   Visit?             @relation("VisitReschedule")
+  photos          VisitPhoto[]
+  activities      VisitActivity[]
+  expenses        TransportExpense[]
+  routeStop       RouteStop?
+
+  @@index([employeeId, scheduledDate])
+  @@index([storeId, scheduledDate])
+  @@index([routeId, order])
+  @@index([status])
+  @@index([scheduledDate])
+  @@map("visits")
+}
+
+model VisitPhoto {
+  id            String        @id @default(uuid()) @db.VarChar(36)
+  visitId       String        @db.VarChar(36)
+  // Chaves no StorageService (a API entrega URLs assinadas temporárias)
+  fileUrl       String        @db.VarChar(500)
+  thumbnailUrl  String?       @db.VarChar(500)
+  fileName      String        @db.VarChar(255)
+  mimeType      String        @db.VarChar(100)
+  originalSize  Int
+  optimizedSize Int
+  width         Int
+  height        Int
+  category      PhotoCategory @default(OTHER)
+  caption       String?       @db.VarChar(500)
+  createdAt     DateTime      @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId, createdAt])
+  @@map("visit_photos")
+}
+
+model VisitActivity {
+  id          String            @id @default(uuid()) @db.VarChar(36)
+  visitId     String            @db.VarChar(36)
+  userId      String?           @db.VarChar(36)
+  type        VisitActivityType
+  description String            @db.Text
+  createdAt   DateTime          @default(now())
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([visitId, createdAt])
+  @@index([createdAt])
+  @@map("visit_activities")
+}
+
+// ---------------------- Transporte e despesas ------------------------
+
+model TransportExpense {
+  id             String        @id @default(uuid()) @db.VarChar(36)
+  employeeId     String        @db.VarChar(36)
+  routeId        String?       @db.VarChar(36)
+  visitId        String?       @db.VarChar(36)
+  date           DateTime      @db.Date
+  type           TransportType
+  description    String?       @db.VarChar(500)
+  // Valor considerado nos totais: actualValue quando informado, senão estimatedValue
+  value          Decimal       @db.Decimal(10, 2)
+  estimatedValue Decimal?      @db.Decimal(10, 2)
+  actualValue    Decimal?      @db.Decimal(10, 2)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  employee User   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  route    Route? @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  visit    Visit? @relation(fields: [visitId], references: [id], onDelete: SetNull)
+
+  @@index([employeeId, date])
+  @@index([routeId])
+  @@index([visitId])
+  @@map("transport_expenses")
+}
+
+model TransportFare {
+  id             String        @id @default(uuid()) @db.VarChar(36)
+  type           TransportType
+  operator       String        @db.VarChar(120)
+  description    String?       @db.VarChar(255)
+  value          Decimal       @db.Decimal(10, 2)
+  effectiveFrom  DateTime      @db.Date
+  effectiveUntil DateTime?     @db.Date
+  active         Boolean       @default(true)
+  // false = valor de referência ainda não confirmado pelo usuário
+  verified       Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  @@index([type, active])
+  @@map("transport_fares")
+}
+
+// ------------------- Notificações, auditoria, acesso -----------------
+
+model Notification {
+  id        String           @id @default(uuid()) @db.VarChar(36)
+  userId    String           @db.VarChar(36)
+  type      NotificationType
+  title     String           @db.VarChar(191)
+  message   String           @db.Text
+  link      String?          @db.VarChar(500)
+  read      Boolean          @default(false)
+  dedupeKey String?          @unique @db.VarChar(191)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
+}
+
+model AuditLog {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  userId    String?  @db.VarChar(36)
+  entity    String   @db.VarChar(60)
+  entityId  String?  @db.VarChar(191)
+  action    String   @db.VarChar(60)
+  // JSON serializado (texto)
+  metadata  String?  @db.Text
+  ipAddress String?  @db.VarChar(64)
+  userAgent String?  @db.VarChar(255)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+model SharedAccess {
+  id             String    @id @default(uuid()) @db.VarChar(36)
+  label          String    @db.VarChar(120)
+  // Somente o hash SHA-256 do token é armazenado; o token é exibido uma única vez
+  tokenHash      String    @unique @db.VarChar(128)
+  tokenPreview   String    @db.VarChar(12)
+  // Token cifrado (AES-256-GCM) para permitir copiar o link novamente
+  tokenEncrypted String?   @db.Text
+  // Escopos separados por vírgula: visits,photos,authorizations,expenses,routes
+  scope          String    @db.VarChar(255)
+  expiresAt      DateTime?
+  active         Boolean   @default(true)
+  revokedAt      DateTime?
+  lastAccessAt   DateTime?
+  accessCount    Int       @default(0)
+  createdById    String?   @db.VarChar(36)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  createdBy User? @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([active])
+  @@map("shared_accesses")
+}
+
+model CompanySetting {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  key       String   @unique @db.VarChar(120)
+  value     String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("company_settings")
+}
+
+model ImportRun {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  fileName  String   @db.VarChar(255)
+  fileHash  String   @db.VarChar(64)
+  dryRun    Boolean  @default(false)
+  // SUCCESS | SUCCESS_WITH_WARNINGS | FAILED
+  status    String   @db.VarChar(40)
+  // JSON (texto): contagens criadas/atualizadas/ignoradas
+  summary   String   @db.Text
+  // JSON (texto): inconsistências encontradas na planilha
+  issues    String   @db.Text
+  userId    String?  @db.VarChar(36)
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("import_runs")
+}

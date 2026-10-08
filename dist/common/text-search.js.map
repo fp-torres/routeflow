@@ -1,0 +1,1 @@
+{"version":3,"file":"text-search.js","sourceRoot":"","sources":["../../src/common/text-search.ts"],"names":[],"mappings":";;AAMA,kDAIC;AARD;;;GAGG;AACH,SAAgB,mBAAmB,CAAC,QAA0B,EAAE,KAAa;IAC3E,OAAO,QAAQ,KAAK,YAAY;QAC9B,CAAC,CAAC,EAAE,QAAQ,EAAE,KAAK,EAAE,IAAI,EAAE,aAAsB,EAAE;QACnD,CAAC,CAAC,EAAE,QAAQ,EAAE,KAAK,EAAE,CAAC;AAC1B,CAAC"}

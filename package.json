@@ -1,0 +1,43 @@
+{
+  "name": "routeflow-app",
+  "version": "1.0.0",
+  "private": true,
+  "routeflowRelease": true,
+  "description": "RouteFlow — pacote de produção (API NestJS + frontend React).",
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "build": "echo \"Pacote pré-compilado: nada a compilar.\"",
+    "start": "node dist/main.js",
+    "db:deploy": "prisma migrate deploy --config prisma/mysql/prisma.config.ts",
+    "db:seed": "node dist/cli/seed.js",
+    "import:xlsx": "node dist/cli/import-spreadsheet.js",
+    "geocode:stores": "node dist/cli/geocode-stores.js"
+  },
+  "dependencies": {
+    "@nestjs/common": "11.2.7",
+    "@nestjs/core": "11.2.7",
+    "@nestjs/jwt": "11.0.2",
+    "@nestjs/platform-express": "11.2.7",
+    "@nestjs/schedule": "6.1.3",
+    "@nestjs/throttler": "6.7.1",
+    "@prisma/adapter-mariadb": "7.10.0",
+    "@prisma/adapter-pg": "7.10.0",
+    "@prisma/client": "7.10.0",
+    "@routeflow/types": "file:vendor/routeflow-types",
+    "bcryptjs": "3.0.3",
+    "compression": "1.8.2",
+    "cookie-parser": "1.4.7",
+    "dotenv": "17.4.2",
+    "exceljs": "4.4.0",
+    "helmet": "8.3.0",
+    "jszip": "3.10.2",
+    "pdfkit": "0.17.2",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "sharp": "0.34.5",
+    "zod": "4.6.5",
+    "prisma": "7.10.0"
+  }
+}

@@ -1,0 +1,1 @@
+function e(e){return e==null?`—`:new Intl.NumberFormat(`pt-BR`,{style:`currency`,currency:`BRL`}).format(e)}export{e as t};
