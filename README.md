@@ -5,7 +5,7 @@
 RouteFlow centraliza a operação de um promotor que visita lojas (inicialmente farmácias das redes **Drogaria Venancio** e **Cristal**, no Rio de Janeiro): agenda, rotas Casa → lojas → Casa, visitas com fotos e observações, cartas de autorização em PDF com controle de vencimento, transporte e despesas, histórico, dashboards, relatórios em PDF/Excel e um painel público somente leitura para o empregador.
 
 - Repositório: https://github.com/fp-torres/routeflow
-- Produção: https://routeflow.forgedevapps.com.br (configurável via `APP_URL`)
+- Produção: https://routeflow.forgedevapps.com (configurável via `APP_URL`)
 
 ---
 
@@ -149,6 +149,6 @@ Um único processo Node.js serve API e frontend; banco MySQL/MariaDB do plano; a
 - **Coordenadas:** obtidas automaticamente (OpenStreetMap) alguns segundos após a API iniciar — ~1 minuto para as 43 lojas. Endereços sem número (V104, V127) ficam com localização aproximada da rua; complete-os no cadastro da loja.
 - **Tarifas:** a planilha não traz valores de transporte. O seed cria tarifas de **referência marcadas como não confirmadas** (ônibus R$ 4,70, MetrôRio R$ 7,90, SuperVia R$ 7,60); confirme os valores vigentes em Configurações › Tarifas.
 - **Transporte público:** o Google Maps não aceita uma rota de transporte público com várias paradas num único link — por isso cada trecho (e o botão “próxima loja”) abre o trajeto real de transporte público no Google Maps. Dentro do app, sem chave, tempos e custos são **estimativas** rotuladas; com `ROUTE_PROVIDER=google` + `GOOGLE_MAPS_API_KEY` (Routes API) aparecem linhas, estações e tempos reais, e a otimização usa esses tempos (veja docs/deployment.md).
-- **Domínio:** o domínio principal informado é `forgedevapps.com`, mas a aplicação usa `routeflow.forgedevapps.com.br`; o `.com.br` precisa estar registrado e apontado para a Hostinger.
+- **Domínio:** `routeflow.forgedevapps.com` precisa estar apontado para a Hostinger e com SSL ativo.
 - **Privacidade:** a planilha contém o endereço residencial. Em repositório público, considere manter `data/` fora do Git (use `SEED_SPREADSHEET_PATH`).
 - **Armazenamento S3/R2** e **offline completo** ainda não estão implementados (a interface `StorageDriver` e o PWA já estão preparados).

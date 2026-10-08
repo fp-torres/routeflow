@@ -8,9 +8,9 @@
     "type": "git",
     "url": "https://github.com/fp-torres/routeflow.git"
   },
-  "homepage": "https://routeflow.forgedevapps.com.br",
+  "homepage": "https://routeflow.forgedevapps.com",
   "engines": {
-    "node": ">=20.19.0",
+    "node": ">=22.13.0",
     "npm": ">=10"
   },
   "workspaces": [
@@ -27,7 +27,7 @@
     "dev:web": "npm run dev -w @routeflow/web",
     "build": "npm run db:generate && npm run build:packages && npm run build -w @routeflow/web && npm run build -w @routeflow/api",
     "build:packages": "npm run build -w @routeflow/types",
-    "build:hostinger": "npm run build",
+    "build:hostinger": "npm install --include=dev --no-audit --no-fund && npm run build",
     "start": "node apps/api/dist/main.js",
     "start:prod": "node apps/api/dist/main.js",
     "test": "npm run build:packages && npm run test -w @routeflow/types && npm run test -w @routeflow/ui && npm run test -w @routeflow/web && npm run test -w @routeflow/api",
