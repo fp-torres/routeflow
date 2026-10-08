@@ -33,7 +33,7 @@ O GitHub Actions testa e compila tudo e publica o pacote de produção na branch
 
 1. Envie o código para a `main` do GitHub e aguarde o workflow **CI** e depois o **Deploy (Hostinger)** (aba Actions). Na primeira vez, se preferir, rode o **Deploy (Hostinger)** manualmente (“Run workflow”) para criar a branch `deploy`.
 2. hPanel › **Sites › Criar site › Web app Node.js** › **Importar repositório Git** › **Conecte-se com GitHub** (funciona com repositório privado — recomendado) › escolha `fp-torres/routeflow` e a branch **`deploy`**.
-3. Configurações de build: Node.js **22.13.x ou superior**; diretório raiz `/`; comando de instalação `npm install --include=dev`; comando de build `npm run build`; arquivo de entrada **`apps/api/dist/main.js`** (ou comando de start `npm start`. O build precisa das dependências de desenvolvimento, incluindo `tsup`, `vite`, TypeScript e Prisma).
+3. Configurações de build: Node.js **22.13.x ou superior**; diretório raiz `/`; comando de instalação `npm install`; comando de build `npm run build`; arquivo de entrada **`apps/api/dist/main.js`** (ou comando de start `npm start`. O arquivo `.npmrc` na raiz força a instalação das dependências de desenvolvimento necessárias ao build, mesmo com `NODE_ENV=production`, incluindo `tsup`, `vite`, TypeScript e Prisma).
 4. Variáveis de ambiente (passo 2 desta página) **mais**, no primeiro deploy:
    - `MIGRATE_ON_START=true` — aplica as migrations ao iniciar (deixe sempre ligado: a cada deploy o banco é atualizado sozinho);
    - `SEED_ON_START=true`, `SEED_USER_EMAIL`, `SEED_USER_NAME`, `SEED_USER_PASSWORD` — cria o administrador e importa a planilha. **Depois do primeiro acesso, troque `SEED_ON_START` para `false`.**
@@ -47,7 +47,7 @@ O pacote também pode ser gerado localmente (`npm run build && npm run release:p
 
 ## 3. Aplicação Node.js — opção B: build no servidor
 
-Conecte a branch **`main`** e use build `npm install --include=dev && npm run build` e start `npm run start:prod` (entrada `apps/api/dist/main.js`). É mais pesado para o plano compartilhado, mas é o fluxo correto quando a branch pré-compilada `deploy` ainda não existe.
+Conecte a branch **`main`** e use build `npm install && npm run build` e start `npm run start:prod` (entrada `apps/api/dist/main.js`). O `.npmrc` garante que as ferramentas de build sejam instaladas; esse fluxo é mais pesado para o plano compartilhado, mas é o correto quando a branch pré-compilada `deploy` ainda não existe.
 
 ## 4. Domínio, HTTPS e cookies
 
