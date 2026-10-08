@@ -18,7 +18,7 @@ apps/api/src/generated/
 !.env.example
 
 # Arquivos enviados pelos usuários (fotos, PDFs) e relatórios de importação
-storage/
+/storage/
 
 # Logs e sistema
 *.log
